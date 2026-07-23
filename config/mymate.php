@@ -120,6 +120,15 @@ return [
         // Address -> lat/lng geocoder, proxied server-side (fixed trusted host, like the
         // update check). Empty disables address lookup; drag-drop still works.
         'geocoder_url' => env('MYMATE_MAP_GEOCODER_URL', 'https://nominatim.openstreetmap.org/search'),
+
+        // Vector basemap (MapLibre GL). When style_url is set the geo map renders a WebGL
+        // vector basemap + clustered devices + backhaul lines coloured by live utilisation,
+        // instead of the Leaflet raster view. The style + its pmtiles/glyphs/sprite are all
+        // served same-origin from public/map (see deploy/build/build-basemap.sh), so there's
+        // no third-party host and the CSP stays clean. Empty = Leaflet raster.
+        'basemap' => [
+            'style_url' => env('MYMATE_MAP_STYLE_URL', ''),             // e.g. /map/style.json
+        ],
     ],
 
     // Sites: physical locations (towers, fiber cabinets, POPs) devices are placed at.

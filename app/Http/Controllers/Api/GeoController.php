@@ -18,11 +18,16 @@ class GeoController extends Controller
     {
         $tileUrl = (string) config('mymate.map.tile_url', '');
 
+        $styleUrl = (string) config('mymate.map.basemap.style_url', '');
+
         return response()->json(['data' => [
-            'enabled' => $tileUrl !== '',
+            'enabled' => $tileUrl !== '' || $styleUrl !== '',
             'tile_url' => $tileUrl,
             'attribution' => (string) config('mymate.map.tile_attribution', ''),
             'geocoder_enabled' => (string) config('mymate.map.geocoder_url', '') !== '',
+            // Vector basemap: when a style URL is set the SPA renders the MapLibre GL view
+            // (clustered devices + utilisation-coloured backhauls) instead of Leaflet raster.
+            'basemap' => $styleUrl === '' ? null : ['style_url' => $styleUrl],
         ]]);
     }
 

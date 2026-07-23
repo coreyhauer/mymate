@@ -6,6 +6,9 @@ export interface MapConfig {
     tile_url: string;
     attribution: string;
     geocoder_enabled: boolean;
+    // Vector basemap: when present the geo view renders MapLibre GL (clustered devices +
+    // utilisation-coloured backhauls) against this same-origin style; absent = Leaflet raster.
+    basemap: { style_url: string } | null;
 }
 
 /** Tile URL + attribution for the geo overlay (from server config). */

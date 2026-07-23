@@ -30,7 +30,9 @@
         "d3-force": "^3.0.0",
         "laravel-echo": "^2.3.7",
         "leaflet": "^1.9.4",
+        "pmtiles": "^4.4.0",
         "leaflet.markercluster": "^1.5.3",
+        "maplibre-gl": "^5.9.0",
         "pusher-js": "^8.5.0",
         "react": "^19.2.7",
         "react-dom": "^19.2.7"

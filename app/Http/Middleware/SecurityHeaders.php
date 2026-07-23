@@ -27,7 +27,8 @@ class SecurityHeaders
         // Geo-overlay map tiles are loaded straight from the tile provider, so its host(s) are
         // allowed in img-src. Configurable (point at an internal tile server, or leave empty).
         $tileHosts = trim((string) config('mymate.map.tile_csp_hosts', ''));
-        $imgSrc = trim("img-src 'self' data: {$tileHosts}");
+        // MapLibre GL renders to a canvas/blob and draws sprite images; allow blob: images.
+        $imgSrc = trim("img-src 'self' data: blob: {$tileHosts}");
 
         $response->headers->set('Content-Security-Policy', implode('; ', [
             "default-src 'self'",
@@ -36,6 +37,9 @@ class SecurityHeaders
             $imgSrc,
             "font-src 'self' data:",
             "connect-src 'self' ws: wss:",
+            // MapLibre GL spawns its render/worker threads from blob: URLs.
+            "worker-src 'self' blob:",
+            "child-src 'self' blob:",
             "frame-ancestors 'none'",
             "base-uri 'self'",
             "form-action 'self'",

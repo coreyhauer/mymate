@@ -27,6 +27,26 @@ export function linkColor(util: number | null, down: boolean): string {
     return `hsl(${hue}, 70%, 45%)`;
 }
 
+/**
+ * Same ramp as {@see linkColor}, but resolved to a concrete colour string (never a CSS
+ * variable) so it can be handed to a WebGL/canvas renderer like MapLibre, which can't read
+ * `var(--…)`. Kept next to linkColor so the two never drift.
+ */
+export function linkColorConcrete(util: number | null, down: boolean): string {
+    if (down) {
+        return '#52525b'; // matches --link-down: a distinct grey, never reads as busy
+    }
+    if (util === null) {
+        return '#71717a'; // --link-unknown: neutral, not "idle/green"
+    }
+
+    const ratio = Math.min(Math.max(util, 0), 100) / 100;
+    const curved = RAMP_CURVE === 1 ? ratio : ratio ** RAMP_CURVE;
+    const hue = 120 - 120 * curved;
+
+    return `hsl(${hue}, 70%, 45%)`;
+}
+
 /** Stroke width scales subtly with load (idle links stay slim, busy links thicken).
  *  Kept deliberately slim so links read as fine wires, not a motorway - load is also
  *  encoded by colour + the % label, so width can stay subtle (never colour-alone). */
