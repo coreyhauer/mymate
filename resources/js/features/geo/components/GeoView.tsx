@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+// Marker clustering: an access network puts thousands of devices on a few thousand sites, all
+// stacked on the same points. Drawing every marker at once locks the browser; the cluster group
+// collapses them into count-bubbles that split apart as you zoom, so the whole fleet renders
+// smoothly. The default cluster icons are CSS-drawn divs (no image requests), so it stays
+// CSP-clean like the rest of the map.
+import 'leaflet.markercluster';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { MagnifyingGlass, MapPin, X } from '@phosphor-icons/react';
 import { useDevices } from '../../devices/api/getDevices';
 import { useUpdateDevice } from '../../devices/api/updateDevice';
@@ -10,6 +18,13 @@ import { pushToast } from '../../../lib/toast';
 import type { Device, DeviceStatus } from '../../../types';
 
 const STATUS_COLOR: Record<DeviceStatus, string> = { up: '#34d399', down: '#f43f5e', unknown: '#52525b' };
+
+// What a device draws at: its own pin when it has one, otherwise its site's coordinates (the
+// backend resolves this into geo_latitude/geo_longitude). A device sitting at a placed site is
+// therefore "placed" here without an own pin, so it shows on the map and drops out of the
+// unplaced list. Dragging it still writes its own latitude/longitude (an explicit override).
+const geoLat = (d: Device): number | null => d.geo_latitude;
+const geoLng = (d: Device): number | null => d.geo_longitude;
 
 /** A status-coloured pin as an HTML div icon (no external marker images -> CSP-clean). */
 function pinIcon(status: DeviceStatus): L.DivIcon {
@@ -37,11 +52,12 @@ export function GeoView() {
     const mapRef = useRef<L.Map | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const markersRef = useRef<Map<number, L.Marker>>(new Map());
+    const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
     const [placingId, setPlacingId] = useState<number | null>(null); // device awaiting a click-to-place
     const [address, setAddress] = useState('');
 
-    const placed = useMemo(() => (devices ?? []).filter((d) => d.latitude != null && d.longitude != null), [devices]);
-    const unplaced = useMemo(() => (devices ?? []).filter((d) => d.latitude == null || d.longitude == null), [devices]);
+    const placed = useMemo(() => (devices ?? []).filter((d) => geoLat(d) != null && geoLng(d) != null), [devices]);
+    const unplaced = useMemo(() => (devices ?? []).filter((d) => geoLat(d) == null || geoLng(d) == null), [devices]);
     const placingRef = useRef<number | null>(null);
     placingRef.current = placingId;
 
@@ -55,6 +71,13 @@ export function GeoView() {
         L.tileLayer(config.tile_url, { attribution: config.attribution, maxZoom: 19 }).addTo(map);
         mapRef.current = map;
 
+        // One cluster group holds every device marker. chunkedLoading keeps the main thread
+        // free while thousands are added; spiderfy fans out the co-located devices at a site
+        // when you click its cluster at max zoom.
+        const cluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 48, spiderfyOnMaxZoom: true });
+        cluster.addTo(map);
+        clusterRef.current = cluster;
+
         // Click the map to drop the device currently being placed.
         map.on('click', (e: L.LeafletMouseEvent) => {
             const id = placingRef.current;
@@ -64,35 +87,41 @@ export function GeoView() {
             }
         });
 
-        return () => { map.remove(); mapRef.current = null; markersRef.current.clear(); };
+        return () => { map.remove(); mapRef.current = null; clusterRef.current = null; markersRef.current.clear(); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [config?.enabled]);
 
-    // Sync markers to the placed devices.
+    // Sync markers (inside the cluster group) to the placed devices. Add/remove go through the
+    // cluster group so it re-clusters incrementally rather than redrawing the whole fleet.
     useEffect(() => {
-        const map = mapRef.current;
-        if (!map) return;
+        const cluster = clusterRef.current;
+        if (!cluster) return;
         const seen = new Set<number>();
 
+        const toAdd: L.Marker[] = [];
         for (const d of placed) {
             seen.add(d.id);
-            const pos: L.LatLngExpression = [d.latitude as number, d.longitude as number];
+            const pos: L.LatLngExpression = [geoLat(d) as number, geoLng(d) as number];
             let marker = markersRef.current.get(d.id);
             if (!marker) {
                 marker = L.marker(pos, { icon: pinIcon(d.status), draggable: isAdmin, title: d.name });
                 marker.bindTooltip(d.name, { direction: 'top', offset: [0, -8] });
                 marker.on('dragend', () => { const p = marker!.getLatLng(); save(d.id, p.lat, p.lng); });
-                marker.addTo(map);
                 markersRef.current.set(d.id, marker);
+                toAdd.push(marker);
             } else {
                 marker.setLatLng(pos);
                 marker.setIcon(pinIcon(d.status));
             }
         }
+        if (toAdd.length) cluster.addLayers(toAdd);
+
         // Drop markers for devices no longer placed.
+        const toRemove: L.Marker[] = [];
         for (const [id, marker] of markersRef.current) {
-            if (!seen.has(id)) { marker.remove(); markersRef.current.delete(id); }
+            if (!seen.has(id)) { toRemove.push(marker); markersRef.current.delete(id); }
         }
+        if (toRemove.length) cluster.removeLayers(toRemove);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [placed, isAdmin]);
 
@@ -102,7 +131,7 @@ export function GeoView() {
         const map = mapRef.current;
         if (!map || fittedRef.current || placed.length === 0) return;
         fittedRef.current = true;
-        const bounds = L.latLngBounds(placed.map((d) => [d.latitude as number, d.longitude as number] as L.LatLngExpression));
+        const bounds = L.latLngBounds(placed.map((d) => [geoLat(d) as number, geoLng(d) as number] as L.LatLngExpression));
         map.fitBounds(bounds, { padding: [60, 60], maxZoom: 14 });
     }, [placed]);
 
