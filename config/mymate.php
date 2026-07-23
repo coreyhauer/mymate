@@ -122,6 +122,16 @@ return [
         'geocoder_url' => env('MYMATE_MAP_GEOCODER_URL', 'https://nominatim.openstreetmap.org/search'),
     ],
 
+    // Sites: physical locations (towers, fiber cabinets, POPs) devices are placed at.
+    'sites' => [
+        // Include subscriber/endpoint sites when importing from an external inventory.
+        // Off by default: an access network has tens of thousands of subscriber endpoints,
+        // and turning them all into sites makes the site list a customer database and the map
+        // a cloud of pins. Infrastructure (towers/cabinets) is what a NOC actually watches, so
+        // that's the default scope; flip this on to pull endpoints in as a separate kind.
+        'include_subscribers' => (bool) env('MYMATE_SITES_INCLUDE_SUBSCRIBERS', false),
+    ],
+
     // Update check: compare this install's version against the latest GitHub release so
     // the console can flag when a newer version is out. The version comes from
     // MYMATE_VERSION (stamped by the packaged build) or the repo-root VERSION file.

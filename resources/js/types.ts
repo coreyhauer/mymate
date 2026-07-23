@@ -34,9 +34,17 @@ export interface Device {
     last_change: string | null;
     map_x: number;
     map_y: number;
-    latitude: number | null; // geo overlay position
+    latitude: number | null; // device's own geo overlay pin
     longitude: number | null;
     geo_source: 'manual' | 'address' | 'snmp' | null;
+    // Site placement. geo_latitude/geo_longitude is what the map draws at: the device's own
+    // pin when it has one, else its site's coordinates - so assigning a site places the
+    // device without copying coordinates onto it.
+    site_id: number | null;
+    site_name: string | null;
+    site_source: 'manual' | 'import' | 'nearest' | null;
+    geo_latitude: number | null;
+    geo_longitude: number | null;
     credential_id: number | null;
     ssh_credential_id: number | null; // dedicated SSH cred for backups (separate from poll cred)
     routeros_credential_id: number | null; // optional RouterOS-API cred for OSPF reads on SNMP devices

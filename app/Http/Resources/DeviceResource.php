@@ -9,6 +9,10 @@ class DeviceResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        // Resolved once - effectiveCoordinates() will lazy-load the site if the caller didn't
+        // eager-load it, and the collection endpoints render thousands of these.
+        [$geoLat, $geoLng] = $this->effectiveCoordinates() ?? [null, null];
+
         return [
             'id' => $this->id,
             'name' => $this->name,
@@ -22,6 +26,14 @@ class DeviceResource extends JsonResource
             'latitude' => $this->latitude,
             'longitude' => $this->longitude,
             'geo_source' => $this->geo_source,
+            // Site placement. `geo_*` is what the map should draw at: the device's own pin
+            // when it has one, otherwise the site's - so assigning a site places every device
+            // at it without copying coordinates onto each row.
+            'site_id' => $this->site_id,
+            'site_name' => $this->whenLoaded('site', fn () => $this->site?->name),
+            'site_source' => $this->site_source,
+            'geo_latitude' => $geoLat,
+            'geo_longitude' => $geoLng,
             'credential_id' => $this->credential_id,
             'ssh_credential_id' => $this->ssh_credential_id,
             'routeros_credential_id' => $this->routeros_credential_id,

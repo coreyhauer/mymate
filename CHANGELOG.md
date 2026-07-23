@@ -13,6 +13,18 @@ of commit subjects.
 
 ## [Unreleased]
 
+### Added
+- **Sites: place a whole tower at once.** A site is a physical location (tower, fiber
+  cabinet, POP) that carries coordinates once; every device assigned to it inherits them on
+  the geo map, so you no longer drag a pin per device. Manage them under `/api/sites`, or bulk
+  load from an inventory export with `php artisan mymate:sites:import sites.csv` - sites upsert
+  on an `external_ref` so re-running against your OSS is a safe re-sync. `--map ip-to-site.csv`
+  assigns devices from an authoritative `mgmt_ip,external_ref` list, and `--nearest` snaps any
+  device that carries its own coordinates to the closest site inside a radius. A device's own
+  pin always wins over its site, and an operator's manual site assignment is never overwritten
+  by an import or the nearest-site pass. Endpoint/subscriber sites stay out by default
+  (`MYMATE_SITES_INCLUDE_SUBSCRIBERS`) so the site list doesn't become a customer database.
+
 ## [1.4.0] - 2026-07-24
 
 ### Added

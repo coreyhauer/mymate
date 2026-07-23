@@ -21,6 +21,7 @@ class Device extends Model
     protected $fillable = [
         'name', 'mgmt_ip', 'poll_method', 'credential_id', 'ssh_credential_id', 'routeros_credential_id', 'agent_id',
         'status', 'monitored', 'last_change', 'map_x', 'map_y', 'latitude', 'longitude', 'geo_source',
+        'site_id', 'site_source',
         'device_type', 'icon', 'icon_color', 'parent_device_id', 'vendor', 'model', 'serial', 'cpu', 'ram_bytes', 'arch', 'uptime_seconds', 'uptime_at',
         'os_version', 'latest_version', 'upgrade_status', 'upgrade_message', 'upgrade_at',
         'discovery_error', 'discovered_at',
@@ -97,6 +98,34 @@ class Device extends Model
     public function agent(): BelongsTo
     {
         return $this->belongsTo(Agent::class);
+    }
+
+    /** The physical location this device sits at, or null when it isn't assigned to one. */
+    public function site(): BelongsTo
+    {
+        return $this->belongsTo(Site::class);
+    }
+
+    /**
+     * Where this device draws on the geo map: its own pin when it has one, otherwise its
+     * site's coordinates.
+     *
+     * The inheritance is deliberately read-time rather than copied into the device columns on
+     * assignment. Writing the site's coordinates onto every device would make a site that
+     * moves (a corrected survey, a rebuild) leave thousands of devices behind at the old
+     * position, and would make "has this device been placed itself?" unanswerable.
+     *
+     * @return array{0: float, 1: float}|null [lat, lng], or null when neither is placed
+     */
+    public function effectiveCoordinates(): ?array
+    {
+        if ($this->latitude !== null && $this->longitude !== null) {
+            return [$this->latitude, $this->longitude];
+        }
+
+        $site = $this->relationLoaded('site') ? $this->site : $this->site()->first();
+
+        return $site?->isPlaced() ? [$site->latitude, $site->longitude] : null;
     }
 
     /** The upstream device this one depends on (drives the hierarchy + inspector). */

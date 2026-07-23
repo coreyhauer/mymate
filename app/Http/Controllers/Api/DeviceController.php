@@ -25,7 +25,9 @@ class DeviceController extends Controller
 {
     public function index(): AnonymousResourceCollection
     {
-        return DeviceResource::collection(Device::with('parent')->orderBy('name')->get());
+        // `site` is eager-loaded so DeviceResource can resolve inherited geo coordinates
+        // without an N+1 across the whole fleet.
+        return DeviceResource::collection(Device::with(['parent', 'site'])->orderBy('name')->get());
     }
 
     public function store(StoreDeviceRequest $request, CreateDevice $createDevice): JsonResponse
@@ -42,7 +44,7 @@ class DeviceController extends Controller
 
     public function update(UpdateDeviceRequest $request, Device $device, UpdateDevice $updateDevice): DeviceResource
     {
-        return new DeviceResource($updateDevice($device, $request->validated())->loadMissing('parent'));
+        return new DeviceResource($updateDevice($device, $request->validated())->loadMissing('parent', 'site'));
     }
 
     public function updatePosition(UpdateDevicePositionRequest $request, Device $device, UpdateDevicePosition $updatePosition): DeviceResource
