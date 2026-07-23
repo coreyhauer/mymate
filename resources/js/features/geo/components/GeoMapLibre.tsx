@@ -154,9 +154,33 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
     useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
         ensurePmtilesProtocol();
+
+        // MapLibre requires the style's sprite/glyphs (and our pmtiles source) to be ABSOLUTE
+        // URLs; the served style.json uses root-relative paths so it stays host-agnostic. Fetch
+        // it and rewrite those against the current origin, then hand MapLibre the style object.
+        // Done inline so the map is only created once we have a valid style.
+        let cancelled = false;
+        const origin = window.location.origin;
+        const abs = (u: string) => (u && u.startsWith('/') ? origin + u : u);
+
+        void fetch(styleUrl)
+            .then((r) => r.json())
+            .then((style: maplibregl.StyleSpecification) => {
+                if (cancelled || !containerRef.current) return;
+                if (typeof style.sprite === 'string') style.sprite = abs(style.sprite);
+                if (typeof style.glyphs === 'string') style.glyphs = abs(style.glyphs);
+                for (const src of Object.values(style.sources ?? {})) {
+                    const url = (src as { url?: string }).url;
+                    if (url?.startsWith('pmtiles:///')) (src as { url?: string }).url = 'pmtiles://' + origin + url.slice('pmtiles://'.length);
+                }
+                initMap(style);
+            })
+            .catch((e) => console.error('geo: style fetch failed', e));
+
+        function initMap(style: maplibregl.StyleSpecification) {
         const map = new maplibregl.Map({
-            container: containerRef.current,
-            style: styleUrl,
+            container: containerRef.current!,
+            style,
             center: [-94, 44],
             zoom: 4,
             attributionControl: { compact: true },
@@ -164,6 +188,7 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
         map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
         mapRef.current = map;
 
+        map.on('error', (e) => console.error('geo: map error', e.error));
         map.on('load', () => {
             // Backhauls first so device points sit above the lines.
             map.addSource('backhauls', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
@@ -237,7 +262,15 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
             rebuild.current();
         });
 
-        return () => { map.remove(); mapRef.current = null; readyRef.current = false; fittedRef.current = false; };
+        } // end initMap
+
+        return () => {
+            cancelled = true;
+            mapRef.current?.remove();
+            mapRef.current = null;
+            readyRef.current = false;
+            fittedRef.current = false;
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [styleUrl]);
 
