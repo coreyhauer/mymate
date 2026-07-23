@@ -31,10 +31,23 @@ class GeoTest extends TestCase
             ->assertJsonPath('data.geocoder_enabled', true);
     }
 
-    public function test_map_config_disabled_when_no_tile_url(): void
+    public function test_map_config_disabled_when_no_tile_url_and_no_basemap(): void
     {
-        config(['mymate.map.tile_url' => '']);
-        $this->getJson('/api/map-config')->assertOk()->assertJsonPath('data.enabled', false);
+        config(['mymate.map.tile_url' => '', 'mymate.map.basemap.style_url' => '']);
+        $this->getJson('/api/map-config')
+            ->assertOk()
+            ->assertJsonPath('data.enabled', false)
+            ->assertJsonPath('data.basemap', null);
+    }
+
+    public function test_map_config_reports_the_vector_basemap_when_set(): void
+    {
+        // A vector basemap enables the map (MapLibre renderer) even with no raster tile URL.
+        config(['mymate.map.tile_url' => '', 'mymate.map.basemap.style_url' => '/map/style.json']);
+        $this->getJson('/api/map-config')
+            ->assertOk()
+            ->assertJsonPath('data.enabled', true)
+            ->assertJsonPath('data.basemap.style_url', '/map/style.json');
     }
 
     public function test_geocode_proxies_the_provider_and_returns_coordinates(): void
@@ -73,6 +86,8 @@ class GeoTest extends TestCase
         config(['mymate.map.tile_csp_hosts' => 'https://tiles.example.net']);
         // The security headers ride the web (SPA) response.
         $csp = $this->get('/')->headers->get('Content-Security-Policy');
-        $this->assertStringContainsString("img-src 'self' data: https://tiles.example.net", (string) $csp);
+        $this->assertStringContainsString("img-src 'self' data: blob: https://tiles.example.net", (string) $csp);
+        // MapLibre GL renders in a worker spawned from a blob: URL.
+        $this->assertStringContainsString("worker-src 'self' blob:", (string) $csp);
     }
 }
