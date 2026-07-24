@@ -7,22 +7,19 @@ import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl/dist/maplibre-gl-csp';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
-import { useDevices } from '../../devices/api/getDevices';
-import { useSites } from '../api/sites';
+import { useGeoDevices, useSites, type GeoDevice, type Site } from '../api/sites';
 import { useMapChannel } from '../../topology/hooks/useMapChannel';
 import { selectDevice } from '../../../lib/shellStore';
-import type { Device } from '../../../types';
-import type { Site } from '../api/sites';
 
 /**
  * MapLibre GL geographic view (LTD high-scale renderer).
  *
  * A WISP's real map unit is the SITE (tower / fiber cabinet), not the individual radio, so this
  * renders one marker per site - positioned at its coordinates, sized by how much gear it carries,
- * coloured by live health (any device down -> red) - and only reveals the individual devices when
- * you zoom in (or click a site to drill into it). That keeps tens of thousands of devices legible
- * as a few thousand towers, and avoids the arbitrary proximity blobs a device-level clusterer
- * produces.
+ * coloured by live health (any device down -> red). Zoomed out, sites cluster into regional
+ * groups; zoom in and they resolve to individual sites; zoom in further (or click a site) and the
+ * individual devices appear. Device data comes from a compact geo feed (/geo/devices), not the
+ * full device resource, so opening the map doesn't pull megabytes.
  *
  * Basemap style + its pmtiles/glyphs/sprite are all same-origin (see build-basemap.sh).
  */
@@ -43,14 +40,12 @@ const DEVICE_ZOOM = 11; // at/above this, individual devices show and site marke
 
 type PointFeatures = GeoJSON.FeatureCollection<GeoJSON.Point>;
 
-const geoLng = (d: Device): number | null => d.geo_longitude;
-const geoLat = (d: Device): number | null => d.geo_latitude;
-
 /**
- * Site markers with live health. `down`/`total` are recomputed from the current device snapshot
- * (not the counts the sites endpoint shipped), so a site's colour tracks status flips live.
+ * Site markers with live health. Each carries `down`/`total` computed from the current device
+ * feed, so a site's colour tracks status; the source's clusterProperties sum those across a
+ * cluster so a regional group reads red when any of its sites has a device down.
  */
-function siteMarkers(sites: Site[], devices: Device[]): PointFeatures {
+function siteMarkers(sites: Site[], devices: GeoDevice[]): PointFeatures {
     const agg = new Map<number, { total: number; down: number }>();
     for (const d of devices) {
         if (d.site_id == null) continue;
@@ -74,30 +69,27 @@ function siteMarkers(sites: Site[], devices: Device[]): PointFeatures {
 }
 
 /** Individual devices (shown only when drilled in past DEVICE_ZOOM). */
-function devicePoints(devices: Device[]): PointFeatures {
-    const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
-    for (const d of devices) {
-        const lng = geoLng(d);
-        const lat = geoLat(d);
-        if (lng == null || lat == null) continue;
-        features.push({
+function devicePoints(devices: GeoDevice[]): PointFeatures {
+    return {
+        type: 'FeatureCollection',
+        features: devices.map((d) => ({
             type: 'Feature',
-            geometry: { type: 'Point', coordinates: [lng, lat] },
+            geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
             properties: { id: d.id, name: d.name, status: d.status },
-        });
-    }
-    return { type: 'FeatureCollection', features };
+        })),
+    };
 }
 
 export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
-    const { data: devices } = useDevices();
+    const { data: devices } = useGeoDevices();
     const { data: sites } = useSites();
+    useMapChannel(); // keep the device cache fresh for the top-bar counts on this page
 
     const containerRef = useRef<HTMLDivElement>(null);
     const mapRef = useRef<maplibregl.Map | null>(null);
     const readyRef = useRef(false);
     const fittedRef = useRef(false);
-    const devicesRef = useRef<Device[]>([]);
+    const devicesRef = useRef<GeoDevice[]>([]);
     const sitesRef = useRef<Site[]>([]);
 
     const rebuild = useRef(() => {
@@ -108,7 +100,6 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
         (map.getSource('sites') as maplibregl.GeoJSONSource | undefined)?.setData(siteMarkers(sts, devs));
         (map.getSource('devices') as maplibregl.GeoJSONSource | undefined)?.setData(devicePoints(devs));
 
-        // Fit to the placed sites once, so the map opens on the footprint.
         if (!fittedRef.current) {
             const bounds = new maplibregl.LngLatBounds();
             let any = false;
@@ -121,9 +112,6 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
             }
         }
     });
-
-    // Status flips repaint site health + device dots (recompute from the updated device cache).
-    useMapChannel(undefined, () => rebuild.current());
 
     useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
@@ -160,26 +148,43 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
             map.on('error', (e) => console.error('geo: map error', e.error));
 
             map.on('load', () => {
-                // --- Sites: the primary markers, shown until you drill in ---
-                map.addSource('sites', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+                // --- Sites: primary markers, clustered into regional groups when zoomed out ---
+                map.addSource('sites', {
+                    type: 'geojson',
+                    data: { type: 'FeatureCollection', features: [] },
+                    cluster: true,
+                    clusterRadius: 44,
+                    clusterMaxZoom: DEVICE_ZOOM - 1,
+                    // Sum device + down counts across a cluster so its colour/label aggregate.
+                    clusterProperties: { down: ['+', ['get', 'down']], total: ['+', ['get', 'total']] },
+                });
+                // Any device down in the marker (or, for a cluster, in any of its sites) -> red.
+                const health: maplibregl.ExpressionSpecification = ['case', ['>', ['get', 'down'], 0], STATUS_COLOR.down, STATUS_COLOR.up];
+
                 map.addLayer({
-                    id: 'site-markers', type: 'circle', source: 'sites', maxzoom: DEVICE_ZOOM + 1,
+                    id: 'site-clusters', type: 'circle', source: 'sites', filter: ['has', 'point_count'], maxzoom: DEVICE_ZOOM + 1,
                     paint: {
-                        // Any device down at the site -> red, else green.
-                        'circle-color': ['case', ['>', ['get', 'down'], 0], STATUS_COLOR.down, STATUS_COLOR.up],
-                        // Radius grows with the device count.
-                        'circle-radius': ['interpolate', ['linear'], ['get', 'total'], 1, 8, 20, 14, 100, 20, 500, 28],
-                        'circle-opacity': 0.85,
-                        'circle-stroke-width': 2,
-                        'circle-stroke-color': '#0d0d11',
+                        'circle-color': health,
+                        'circle-radius': ['interpolate', ['linear'], ['get', 'total'], 1, 12, 100, 20, 1000, 30, 5000, 40],
+                        'circle-opacity': 0.8, 'circle-stroke-width': 2, 'circle-stroke-color': '#0d0d11',
                     },
                 });
                 map.addLayer({
-                    id: 'site-count', type: 'symbol', source: 'sites', maxzoom: DEVICE_ZOOM + 1,
-                    layout: {
-                        'text-field': ['to-string', ['get', 'total']],
-                        'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-allow-overlap': true,
+                    id: 'site-cluster-count', type: 'symbol', source: 'sites', filter: ['has', 'point_count'], maxzoom: DEVICE_ZOOM + 1,
+                    layout: { 'text-field': ['to-string', ['get', 'total']], 'text-font': ['Noto Sans Regular'], 'text-size': 12, 'text-allow-overlap': true },
+                    paint: { 'text-color': '#ffffff' },
+                });
+                map.addLayer({
+                    id: 'site-markers', type: 'circle', source: 'sites', filter: ['!', ['has', 'point_count']], maxzoom: DEVICE_ZOOM + 1,
+                    paint: {
+                        'circle-color': health,
+                        'circle-radius': ['interpolate', ['linear'], ['get', 'total'], 1, 7, 20, 12, 100, 18],
+                        'circle-opacity': 0.85, 'circle-stroke-width': 2, 'circle-stroke-color': '#0d0d11',
                     },
+                });
+                map.addLayer({
+                    id: 'site-count', type: 'symbol', source: 'sites', filter: ['!', ['has', 'point_count']], maxzoom: DEVICE_ZOOM + 1,
+                    layout: { 'text-field': ['to-string', ['get', 'total']], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-allow-overlap': true },
                     paint: { 'text-color': '#ffffff' },
                 });
 
@@ -189,23 +194,29 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
                     id: 'device-points', type: 'circle', source: 'devices', minzoom: DEVICE_ZOOM,
                     paint: {
                         'circle-color': ['match', ['get', 'status'], 'up', STATUS_COLOR.up, 'down', STATUS_COLOR.down, STATUS_COLOR.unknown],
-                        'circle-radius': 6,
-                        'circle-stroke-width': 2,
-                        'circle-stroke-color': '#0d0d11',
+                        'circle-radius': 6, 'circle-stroke-width': 2, 'circle-stroke-color': '#0d0d11',
                     },
                 });
 
-                // Click a site -> drill into it (fly + zoom so its devices appear).
+                // Click a cluster -> zoom to its expansion; a site -> drill in; a device -> select.
+                map.on('click', 'site-clusters', (e) => {
+                    const f = map.queryRenderedFeatures(e.point, { layers: ['site-clusters'] })[0];
+                    const clusterId = f?.properties?.cluster_id;
+                    const src = map.getSource('sites') as maplibregl.GeoJSONSource | undefined;
+                    if (clusterId == null || !src) return;
+                    void src.getClusterExpansionZoom(clusterId).then((zoom) => {
+                        map.easeTo({ center: (f.geometry as GeoJSON.Point).coordinates as [number, number], zoom });
+                    });
+                });
                 map.on('click', 'site-markers', (e) => {
                     const f = e.features?.[0];
-                    if (!f) return;
-                    map.easeTo({ center: (f.geometry as GeoJSON.Point).coordinates as [number, number], zoom: 14, duration: 500 });
+                    if (f) map.easeTo({ center: (f.geometry as GeoJSON.Point).coordinates as [number, number], zoom: 14, duration: 500 });
                 });
                 map.on('click', 'device-points', (e) => {
                     const id = e.features?.[0]?.properties?.id;
                     if (typeof id === 'number') selectDevice(id);
                 });
-                for (const layer of ['site-markers', 'device-points']) {
+                for (const layer of ['site-clusters', 'site-markers', 'device-points']) {
                     map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
                     map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
                 }

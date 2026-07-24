@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -29,6 +30,34 @@ class GeoController extends Controller
             // (clustered devices + utilisation-coloured backhauls) instead of Leaflet raster.
             'basemap' => $styleUrl === '' ? null : ['style_url' => $styleUrl],
         ]]);
+    }
+
+    /**
+     * Compact placed-device feed for the geo map. Just what the map draws - id, name, status,
+     * site, and effective coordinates (own pin, else the site's, resolved in SQL) - so the map
+     * doesn't have to pull the full multi-megabyte device resource just to plot dots and colour
+     * sites. Monitored devices only (a paused/acked device isn't on the live map).
+     */
+    public function devices(): JsonResponse
+    {
+        $rows = DB::table('devices as d')
+            ->leftJoin('sites as s', 's.id', '=', 'd.site_id')
+            ->where('d.monitored', true)
+            ->whereRaw('COALESCE(d.latitude, s.latitude) IS NOT NULL')
+            ->selectRaw('d.id, d.name, d.status, d.site_id,
+                COALESCE(d.latitude, s.latitude) AS lat,
+                COALESCE(d.longitude, s.longitude) AS lng')
+            ->get()
+            ->map(fn ($r) => [
+                'id' => (int) $r->id,
+                'name' => $r->name,
+                'status' => $r->status,
+                'site_id' => $r->site_id !== null ? (int) $r->site_id : null,
+                'lat' => (float) $r->lat,
+                'lng' => (float) $r->lng,
+            ]);
+
+        return response()->json(['data' => $rows]);
     }
 
     /** Geocode an address to coordinates via the configured provider (proxied + best-effort). */

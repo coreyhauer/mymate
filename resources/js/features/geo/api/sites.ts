@@ -19,6 +19,31 @@ export const siteKeys = {
     list: () => [...siteKeys.all, 'list'] as const,
 };
 
+/** A device as the geo map needs it - compact, so the map doesn't pull the full device list. */
+export interface GeoDevice {
+    id: number;
+    name: string;
+    status: 'up' | 'down' | 'unknown';
+    site_id: number | null;
+    lat: number;
+    lng: number;
+}
+
+/**
+ * Compact placed-device feed for the geo map (id/name/status/site/coords only) - a fraction of
+ * the full /devices payload. Refetched periodically so site health + device dots stay current.
+ */
+export function useGeoDevices() {
+    return useQuery({
+        queryKey: ['geo', 'devices'],
+        queryFn: async (): Promise<GeoDevice[]> => {
+            const { data } = await apiClient.get<{ data: GeoDevice[] }>('/geo/devices');
+            return data.data;
+        },
+        refetchInterval: 15000,
+    });
+}
+
 /** All sites with their device + down counts (the geo map's primary markers). */
 export function useSites() {
     return useQuery({

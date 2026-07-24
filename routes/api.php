@@ -60,6 +60,8 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
         ->middleware('throttle:20,1')->name('update-check');
     // Geo overlay: tile config + a server-side geocoder proxy (GitHub #11).
     Route::get('map-config', [\App\Http\Controllers\Api\GeoController::class, 'config'])->name('map.config');
+    // Compact placed-device feed for the geo map (id/name/status/site/coords only).
+    Route::get('geo/devices', [\App\Http\Controllers\Api\GeoController::class, 'devices'])->name('geo.devices');
     Route::get('geocode', [\App\Http\Controllers\Api\GeoController::class, 'geocode'])
         ->middleware('throttle:30,1')->name('geocode');
     // System status board (db/redis/workers/polling/websockets/backups) for Settings.
