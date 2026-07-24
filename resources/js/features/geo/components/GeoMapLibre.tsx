@@ -1,7 +1,15 @@
 import { useEffect, useRef } from 'react';
-import maplibregl from 'maplibre-gl';
+// The CSP build loads its worker from a real same-origin URL (setWorkerUrl below) instead of an
+// inlined blob. The blob path breaks under this project's rolldown-vite bundler - maplibre's
+// GeoJSON worker source ends up referencing a main-thread variable that isn't in the worker's
+// scope ("<var> is not defined"), so the basemap renders but any GeoJSON source (our
+// devices/backhauls) fails. The CSP worker is self-contained, so it sidesteps that entirely.
+import maplibregl from 'maplibre-gl/dist/maplibre-gl-csp';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
+
+// maplibre-gl's own pre-built worker, served same-origin (see deploy/build/build-basemap.sh).
+maplibregl.setWorkerUrl('/vendor/maplibre-gl-csp-worker.js');
 import { useDevices } from '../../devices/api/getDevices';
 import { useLinks } from '../../topology/api/getLinks';
 import { useMapChannel } from '../../topology/hooks/useMapChannel';

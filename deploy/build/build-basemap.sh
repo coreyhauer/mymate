@@ -78,4 +78,14 @@ writeFileSync(process.argv[1], JSON.stringify({
 JS
 THEME="$THEME" node "$WORK/gen.mjs" "$MAP_DIR/style.json"
 
+# --- 4. maplibre CSP worker (served same-origin, loaded via setWorkerUrl) -----------------
+# The CSP worker sidesteps a bundler issue where the inlined-blob worker breaks (see
+# GeoMapLibre.tsx). Copied from the installed package to public/vendor.
+CSP_WORKER="$APP_DIR/node_modules/maplibre-gl/dist/maplibre-gl-csp-worker.js"
+if [ -f "$CSP_WORKER" ]; then
+    say "installing maplibre CSP worker -> public/vendor"
+    mkdir -p "$APP_DIR/public/vendor"
+    cp "$CSP_WORKER" "$APP_DIR/public/vendor/maplibre-gl-csp-worker.js"
+fi
+
 say "done. Set MYMATE_MAP_STYLE_URL=/map/style.json in .env, clear config cache, and reload."
