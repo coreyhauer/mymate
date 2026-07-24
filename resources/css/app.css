@@ -176,3 +176,25 @@ label,
         animation: none !important;
     }
 }
+
+/* Dark theming for the geo map's MapLibre popups (site name + device list). MapLibre's own
+   stylesheet sets a white background on the same single-class selector, and can load after this
+   one, so these use !important to win regardless of bundle order. */
+.maplibregl-popup-content {
+    background: #12131a !important;
+    color: #e5e7eb !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 10px !important;
+    padding: 10px 12px !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+}
+.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: #12131a !important; }
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: #12131a !important; }
+.maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: #12131a !important; }
+.maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: #12131a !important; }
+.maplibregl-popup-close-button { color: #9ca3af !important; font-size: 16px; padding: 0 6px; }
+.maplibregl-popup-close-button:hover { background: rgba(255, 255, 255, 0.08) !important; color: #fff !important; }

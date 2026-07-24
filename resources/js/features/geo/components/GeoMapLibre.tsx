@@ -62,7 +62,8 @@ function siteMarkers(sites: Site[], devices: GeoDevice[]): PointFeatures {
         features.push({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [s.longitude, s.latitude] },
-            properties: { id: s.id, name: s.name, total: a.total, down: a.down },
+            // up/down split so the marker label can show both (cluster sums them).
+            properties: { id: s.id, name: s.name, total: a.total, down: a.down, up: a.total - a.down },
         });
     }
     return { type: 'FeatureCollection', features };
@@ -92,6 +93,57 @@ function devicePoints(devices: GeoDevice[]): PointFeatures {
             properties: { id: d.id, name: d.name, status: d.status },
         })),
     };
+}
+
+/**
+ * Popup for a clicked site: its name, then every device at it with a red/green status dot.
+ * Devices at a site share the site's coordinates, so a list is how you actually "expand" a site
+ * into its gear. Clicking a device opens its inspector. Built as DOM (with per-item handlers) so
+ * it lives inside MapLibre's popup.
+ */
+function openSiteDevices(map: maplibregl.Map, siteName: string, coords: [number, number], devices: GeoDevice[]): void {
+    const devs = [...devices].sort(
+        (a, b) => Number(b.status === 'down') - Number(a.status === 'down') || a.name.localeCompare(b.name),
+    );
+    const down = devs.filter((d) => d.status === 'down').length;
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'font:12px/1.4 system-ui,sans-serif;color:#e5e7eb;min-width:200px;';
+    const head = document.createElement('div');
+    head.style.cssText = 'font-weight:600;font-size:13px;color:#fff;margin-bottom:6px;';
+    head.textContent = siteName;
+    const sub = document.createElement('span');
+    sub.style.cssText = 'font-weight:400;color:#9ca3af;';
+    sub.textContent = ` · ${devs.length} device${devs.length === 1 ? '' : 's'}${down ? ` · ${down} down` : ''}`;
+    head.appendChild(sub);
+    wrap.appendChild(head);
+
+    const list = document.createElement('div');
+    list.style.cssText = 'max-height:240px;overflow:auto;display:flex;flex-direction:column;';
+    const popup = new maplibregl.Popup({ maxWidth: '300px', offset: 12 });
+    for (const d of devs) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;background:none;border:0;color:inherit;cursor:pointer;text-align:left;border-radius:6px;';
+        item.onmouseenter = () => (item.style.background = 'rgba(255,255,255,.06)');
+        item.onmouseleave = () => (item.style.background = 'none');
+        const dot = document.createElement('span');
+        dot.style.cssText = `width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:${STATUS_COLOR[d.status] ?? STATUS_COLOR.unknown};`;
+        const nm = document.createElement('span');
+        nm.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        nm.textContent = d.name;
+        item.append(dot, nm);
+        item.addEventListener('click', () => { selectDevice(d.id); popup.remove(); });
+        list.appendChild(item);
+    }
+    if (devs.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'color:#9ca3af;padding:2px 6px;';
+        empty.textContent = 'No monitored devices at this site.';
+        list.appendChild(empty);
+    }
+    wrap.appendChild(list);
+    popup.setLngLat(coords).setDOMContent(wrap).addTo(map);
 }
 
 export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
@@ -182,12 +234,20 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
                     data: { type: 'FeatureCollection', features: [] },
                     cluster: true,
                     clusterRadius: 44,
-                    clusterMaxZoom: DEVICE_ZOOM - 1,
-                    // Sum device + down counts across a cluster so its colour/label aggregate.
-                    clusterProperties: { down: ['+', ['get', 'down']], total: ['+', ['get', 'total']] },
+                    clusterMaxZoom: 8, // decluster into individual sites fairly early so they're clickable
+                    // Sum up/down/total across a cluster so its colour + label aggregate.
+                    clusterProperties: { down: ['+', ['get', 'down']], up: ['+', ['get', 'up']], total: ['+', ['get', 'total']] },
                 });
                 // Any device down in the marker (or, for a cluster, in any of its sites) -> red.
                 const health: maplibregl.ExpressionSpecification = ['case', ['>', ['get', 'down'], 0], STATUS_COLOR.down, STATUS_COLOR.up];
+                // Label: up count, then the down count appended only when > 0. Kept white (not
+                // green/red) so it reads on both the green (healthy) and red (has-down) circle -
+                // the circle's colour already conveys health; the red down-count would vanish on red.
+                const upDownLabel: maplibregl.ExpressionSpecification = ['case',
+                    ['>', ['get', 'down'], 0],
+                    ['concat', ['to-string', ['get', 'up']], '   ', ['to-string', ['get', 'down']]],
+                    ['to-string', ['get', 'up']],
+                ];
 
                 map.addLayer({
                     id: 'site-clusters', type: 'circle', source: 'sites', filter: ['has', 'point_count'], maxzoom: DEVICE_ZOOM + 1,
@@ -199,7 +259,7 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
                 });
                 map.addLayer({
                     id: 'site-cluster-count', type: 'symbol', source: 'sites', filter: ['has', 'point_count'], maxzoom: DEVICE_ZOOM + 1,
-                    layout: { 'text-field': ['to-string', ['get', 'total']], 'text-font': ['Noto Sans Regular'], 'text-size': 12, 'text-allow-overlap': true },
+                    layout: { 'text-field': upDownLabel, 'text-font': ['Noto Sans Regular'], 'text-size': 12, 'text-allow-overlap': true },
                     paint: { 'text-color': '#ffffff' },
                 });
                 map.addLayer({
@@ -212,7 +272,7 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
                 });
                 map.addLayer({
                     id: 'site-count', type: 'symbol', source: 'sites', filter: ['!', ['has', 'point_count']], maxzoom: DEVICE_ZOOM + 1,
-                    layout: { 'text-field': ['to-string', ['get', 'total']], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-allow-overlap': true },
+                    layout: { 'text-field': upDownLabel, 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-allow-overlap': true },
                     paint: { 'text-color': '#ffffff' },
                 });
 
@@ -226,7 +286,17 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
                     },
                 });
 
-                // Click a cluster -> zoom to its expansion; a site -> drill in; a device -> select.
+                // Hover a site -> name tooltip.
+                const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
+                map.on('mouseenter', 'site-markers', (e) => {
+                    map.getCanvas().style.cursor = 'pointer';
+                    const f = e.features?.[0];
+                    if (f) hover.setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number]).setText(String(f.properties?.name ?? 'Site')).addTo(map);
+                });
+                map.on('mouseleave', 'site-markers', () => { map.getCanvas().style.cursor = ''; hover.remove(); });
+
+                // Click a cluster -> zoom to expand it. Click a site -> pop its devices (name + a
+                // red/green status row each); coincident device coords make a list the real "expand".
                 map.on('click', 'site-clusters', (e) => {
                     const f = map.queryRenderedFeatures(e.point, { layers: ['site-clusters'] })[0];
                     const clusterId = f?.properties?.cluster_id;
@@ -238,13 +308,18 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
                 });
                 map.on('click', 'site-markers', (e) => {
                     const f = e.features?.[0];
-                    if (f) map.easeTo({ center: (f.geometry as GeoJSON.Point).coordinates as [number, number], zoom: 14, duration: 500 });
+                    if (!f) return;
+                    hover.remove();
+                    const siteId = Number(f.properties?.id);
+                    openSiteDevices(map, String(f.properties?.name ?? 'Site'),
+                        (f.geometry as GeoJSON.Point).coordinates as [number, number],
+                        devicesRef.current.filter((d) => d.site_id === siteId));
                 });
                 map.on('click', 'device-points', (e) => {
                     const id = e.features?.[0]?.properties?.id;
                     if (typeof id === 'number') selectDevice(id);
                 });
-                for (const layer of ['site-clusters', 'site-markers', 'device-points']) {
+                for (const layer of ['site-clusters', 'device-points']) {
                     map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
                     map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
                 }

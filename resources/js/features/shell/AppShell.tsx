@@ -115,7 +115,7 @@ export function AppShell() {
             <div className="flex min-h-0 flex-1">
                 <NavRail outageCount={openOutages.data?.length ?? 0} />
                 {mainView}
-                {view === 'map' && <DeviceInspector />}
+                {(view === 'map' || view === 'geo') && <DeviceInspector />}
             </div>
 
             {/* One-time "update available" notice after login (per-version "don't show again"). */}
