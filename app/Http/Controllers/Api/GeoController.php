@@ -60,6 +60,28 @@ class GeoController extends Controller
         return response()->json(['data' => $rows]);
     }
 
+    /**
+     * Site-to-site backhaul links as coordinate pairs, for the geo map. Both ends resolved to
+     * their site's coordinates in SQL; only links whose sites are both placed are returned.
+     */
+    public function backhauls(): JsonResponse
+    {
+        $rows = DB::table('site_links as l')
+            ->join('sites as a', 'a.id', '=', 'l.site_a_id')
+            ->join('sites as b', 'b.id', '=', 'l.site_b_id')
+            ->whereNotNull('a.latitude')->whereNotNull('b.latitude')
+            ->selectRaw('l.id, l.media_type, a.longitude AS a_lng, a.latitude AS a_lat, b.longitude AS b_lng, b.latitude AS b_lat')
+            ->get()
+            ->map(fn ($r) => [
+                'id' => (int) $r->id,
+                'media_type' => $r->media_type,
+                'a' => [(float) $r->a_lng, (float) $r->a_lat],
+                'b' => [(float) $r->b_lng, (float) $r->b_lat],
+            ]);
+
+        return response()->json(['data' => $rows]);
+    }
+
     /** Geocode an address to coordinates via the configured provider (proxied + best-effort). */
     public function geocode(Request $request): JsonResponse
     {

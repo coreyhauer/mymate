@@ -3,9 +3,11 @@
 namespace Tests\Feature;
 
 use App\Actions\Sites\AssignDevicesToSites;
+use App\Actions\Sites\ImportSiteLinks;
 use App\Actions\Sites\ImportSites;
 use App\Models\Device;
 use App\Models\Site;
+use App\Models\SiteLink;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -94,5 +96,25 @@ class SiteImportAssignTest extends TestCase
         $this->assertSame(1, $summary['too_far']);
         $this->assertDatabaseHas('devices', ['id' => $close->id, 'site_id' => $near->id, 'site_source' => 'nearest']);
         $this->assertDatabaseHas('devices', ['id' => $far->id, 'site_id' => null]);
+    }
+
+    public function test_backhaul_import_links_sites_and_is_order_independent(): void
+    {
+        $a = Site::factory()->create(['external_ref' => 'uisp:a']);
+        $b = Site::factory()->create(['external_ref' => 'uisp:b']);
+        $import = app(ImportSiteLinks::class);
+
+        $first = $import($this->csv("site_a_ref,site_b_ref,media_type\nuisp:a,uisp:b,wireless\n"));
+        $this->assertSame(1, $first['created']);
+        $this->assertDatabaseHas('site_links', ['site_a_id' => $a->id, 'site_b_id' => $b->id, 'media_type' => 'wireless']);
+
+        // B->A is the same link (order-independent key) -> update, not a duplicate.
+        $second = $import($this->csv("site_a_ref,site_b_ref,media_type\nuisp:b,uisp:a,fiber\n"));
+        $this->assertSame(1, $second['updated']);
+        $this->assertSame(1, SiteLink::count());
+
+        // Unknown ref or self-link -> skipped.
+        $third = $import($this->csv("site_a_ref,site_b_ref\nuisp:a,uisp:nope\nuisp:a,uisp:a\n"));
+        $this->assertSame(2, $third['skipped']);
     }
 }

@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl/dist/maplibre-gl-csp';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
-import { useGeoDevices, useSites, type GeoDevice, type Site } from '../api/sites';
+import { useBackhauls, useGeoDevices, useSites, type Backhaul, type GeoDevice, type Site } from '../api/sites';
 import { useMapChannel } from '../../topology/hooks/useMapChannel';
 import { selectDevice } from '../../../lib/shellStore';
 
@@ -68,6 +68,20 @@ function siteMarkers(sites: Site[], devices: GeoDevice[]): PointFeatures {
     return { type: 'FeatureCollection', features };
 }
 
+type LineFeatures = GeoJSON.FeatureCollection<GeoJSON.LineString>;
+
+/** Backhaul links -> lines between the two sites' coordinates (real topology from the OSS). */
+function backhaulLines(links: Backhaul[]): LineFeatures {
+    return {
+        type: 'FeatureCollection',
+        features: links.map((l) => ({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: [l.a, l.b] },
+            properties: { wireless: l.media_type === 'wireless' },
+        })),
+    };
+}
+
 /** Individual devices (shown only when drilled in past DEVICE_ZOOM). */
 function devicePoints(devices: GeoDevice[]): PointFeatures {
     return {
@@ -83,6 +97,7 @@ function devicePoints(devices: GeoDevice[]): PointFeatures {
 export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
     const { data: devices } = useGeoDevices();
     const { data: sites } = useSites();
+    const { data: backhauls } = useBackhauls();
     useMapChannel(); // keep the device cache fresh for the top-bar counts on this page
 
     const containerRef = useRef<HTMLDivElement>(null);
@@ -91,6 +106,7 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
     const fittedRef = useRef(false);
     const devicesRef = useRef<GeoDevice[]>([]);
     const sitesRef = useRef<Site[]>([]);
+    const backhaulsRef = useRef<Backhaul[]>([]);
 
     const rebuild = useRef(() => {
         const map = mapRef.current;
@@ -99,6 +115,7 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
         const sts = sitesRef.current;
         (map.getSource('sites') as maplibregl.GeoJSONSource | undefined)?.setData(siteMarkers(sts, devs));
         (map.getSource('devices') as maplibregl.GeoJSONSource | undefined)?.setData(devicePoints(devs));
+        (map.getSource('backhauls') as maplibregl.GeoJSONSource | undefined)?.setData(backhaulLines(backhaulsRef.current));
 
         if (!fittedRef.current) {
             const bounds = new maplibregl.LngLatBounds();
@@ -148,6 +165,17 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
             map.on('error', (e) => console.error('geo: map error', e.error));
 
             map.on('load', () => {
+                // --- Backhauls: real site-to-site topology, drawn under the markers ---
+                map.addSource('backhauls', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+                map.addLayer({
+                    id: 'backhaul-solid', type: 'line', source: 'backhauls', filter: ['!=', ['get', 'wireless'], true],
+                    layout: { 'line-cap': 'round' }, paint: { 'line-color': '#5b8def', 'line-width': 1.5, 'line-opacity': 0.6 },
+                });
+                map.addLayer({
+                    id: 'backhaul-wireless', type: 'line', source: 'backhauls', filter: ['==', ['get', 'wireless'], true],
+                    layout: { 'line-cap': 'round' }, paint: { 'line-color': '#8b9cb3', 'line-width': 1.5, 'line-opacity': 0.55, 'line-dasharray': [2, 1.5] },
+                });
+
                 // --- Sites: primary markers, clustered into regional groups when zoomed out ---
                 map.addSource('sites', {
                     type: 'geojson',
@@ -239,8 +267,9 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
     useEffect(() => {
         devicesRef.current = devices ?? [];
         sitesRef.current = sites ?? [];
+        backhaulsRef.current = backhauls ?? [];
         rebuild.current();
-    }, [devices, sites]);
+    }, [devices, sites, backhauls]);
 
     return <div ref={containerRef} className="h-full w-full bg-[#0d0d11]" />;
 }

@@ -62,6 +62,8 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
     Route::get('map-config', [\App\Http\Controllers\Api\GeoController::class, 'config'])->name('map.config');
     // Compact placed-device feed for the geo map (id/name/status/site/coords only).
     Route::get('geo/devices', [\App\Http\Controllers\Api\GeoController::class, 'devices'])->name('geo.devices');
+    // Site-to-site backhaul links (coordinate pairs) for the geo map.
+    Route::get('geo/backhauls', [\App\Http\Controllers\Api\GeoController::class, 'backhauls'])->name('geo.backhauls');
     Route::get('geocode', [\App\Http\Controllers\Api\GeoController::class, 'geocode'])
         ->middleware('throttle:30,1')->name('geocode');
     // System status board (db/redis/workers/polling/websockets/backups) for Settings.

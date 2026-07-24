@@ -44,6 +44,26 @@ export function useGeoDevices() {
     });
 }
 
+/** A site-to-site backhaul link as coordinate pairs (from the OSS backbone topology). */
+export interface Backhaul {
+    id: number;
+    media_type: string | null;
+    a: [number, number]; // [lng, lat]
+    b: [number, number];
+}
+
+/** Site-to-site backhaul links for the geo map (real topology, imported from the OSS). */
+export function useBackhauls() {
+    return useQuery({
+        queryKey: ['geo', 'backhauls'],
+        queryFn: async (): Promise<Backhaul[]> => {
+            const { data } = await apiClient.get<{ data: Backhaul[] }>('/geo/backhauls');
+            return data.data;
+        },
+        staleTime: 5 * 60 * 1000, // topology changes rarely
+    });
+}
+
 /** All sites with their device + down counts (the geo map's primary markers). */
 export function useSites() {
     return useQuery({
