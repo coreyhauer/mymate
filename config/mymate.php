@@ -146,6 +146,15 @@ return [
         'basemap' => [
             'style_url' => env('MYMATE_MAP_STYLE_URL', ''),             // e.g. /map/style.json
         ],
+
+        // Optional weather-radar overlay (toggle on the geo map). radar_url is a RainViewer-style
+        // weather-maps.json the browser reads to find the latest radar frame; csp_hosts are the
+        // hosts (tiles + api) added to the CSP so the browser may load them. Empty = no weather
+        // toggle. RainViewer is free and keyless; point at your own tiler if you prefer.
+        'weather' => [
+            'radar_url' => env('MYMATE_MAP_WEATHER_URL', 'https://api.rainviewer.com/public/weather-maps.json'),
+            'csp_hosts' => env('MYMATE_MAP_WEATHER_CSP_HOSTS', 'https://*.rainviewer.com'),
+        ],
     ],
 
     // Sites: physical locations (towers, fiber cabinets, POPs) devices are placed at.

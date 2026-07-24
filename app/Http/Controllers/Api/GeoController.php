@@ -29,6 +29,8 @@ class GeoController extends Controller
             // Vector basemap: when a style URL is set the SPA renders the MapLibre GL view
             // (clustered devices + utilisation-coloured backhauls) instead of Leaflet raster.
             'basemap' => $styleUrl === '' ? null : ['style_url' => $styleUrl],
+            // Optional weather-radar overlay: the RainViewer-style JSON the toggle reads. Null = off.
+            'weather_radar_url' => ($w = (string) config('mymate.map.weather.radar_url', '')) !== '' ? $w : null,
         ]]);
     }
 

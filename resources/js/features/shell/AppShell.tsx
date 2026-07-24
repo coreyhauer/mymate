@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { ArrowsIn } from '@phosphor-icons/react';
-import { setWallboard, useView, useWallboard } from '../../lib/shellStore';
+import { setWallboard, useSelectedDeviceId, useView, useWallboard } from '../../lib/shellStore';
 import { TopBar } from './TopBar';
 import { NavRail } from './NavRail';
 import { UpdateNotice } from './UpdateNotice';
@@ -30,6 +30,7 @@ import { ImportView } from '../import/components/ImportView';
  */
 export function AppShell() {
     const view = useView();
+    const selectedDeviceId = useSelectedDeviceId();
     const wallboard = useWallboard();
     const openOutages = useOutages('open');
 
@@ -115,7 +116,7 @@ export function AppShell() {
             <div className="flex min-h-0 flex-1">
                 <NavRail outageCount={openOutages.data?.length ?? 0} />
                 {mainView}
-                {(view === 'map' || view === 'geo') && <DeviceInspector />}
+                {(view === 'map' || (view === 'geo' && selectedDeviceId != null)) && <DeviceInspector />}
             </div>
 
             {/* One-time "update available" notice after login (per-version "don't show again"). */}

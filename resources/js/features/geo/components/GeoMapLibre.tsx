@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 // The CSP build loads its worker from a real same-origin URL (setWorkerUrl below) instead of an
 // inlined blob. The blob path breaks under this project's rolldown-vite bundler - maplibre's
 // GeoJSON worker source ends up referencing a main-thread variable that isn't in the worker's
@@ -57,8 +57,10 @@ function siteMarkers(sites: Site[], devices: GeoDevice[]): PointFeatures {
     const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
     for (const s of sites) {
         if (s.latitude == null || s.longitude == null) continue;
-        const a = agg.get(s.id) ?? { total: s.device_count ?? 0, down: s.devices_down ?? 0 };
-        if (a.total === 0) continue; // an empty site adds no signal to the map
+        // Only sites that actually have monitored devices right now - a site whose gear is all
+        // decommissioned/acked (0 monitored) is not drawn, rather than shown from a stale count.
+        const a = agg.get(s.id);
+        if (!a || a.total === 0) continue;
         features.push({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [s.longitude, s.latitude] },
@@ -146,7 +148,7 @@ function openSiteDevices(map: maplibregl.Map, siteName: string, coords: [number,
     popup.setLngLat(coords).setDOMContent(wrap).addTo(map);
 }
 
-export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
+export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weatherUrl: string | null }) {
     const { data: devices } = useGeoDevices();
     const { data: sites } = useSites();
     const { data: backhauls } = useBackhauls();
@@ -159,6 +161,8 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
     const devicesRef = useRef<GeoDevice[]>([]);
     const sitesRef = useRef<Site[]>([]);
     const backhaulsRef = useRef<Backhaul[]>([]);
+    const [ready, setReady] = useState(false); // map style + our layers are in place
+    const [weatherOn, setWeatherOn] = useState(false);
 
     const rebuild = useRef(() => {
         const map = mapRef.current;
@@ -325,6 +329,7 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
                 }
 
                 readyRef.current = true;
+                setReady(true);
                 rebuild.current();
             });
         }
@@ -346,5 +351,58 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
         rebuild.current();
     }, [devices, sites, backhauls]);
 
-    return <div ref={containerRef} className="h-full w-full bg-[#0d0d11]" />;
+    // Weather radar overlay: fetch the latest RainViewer frame and add a raster layer under the
+    // markers, refreshing every few minutes while enabled. Removed cleanly when toggled off.
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!map || !ready || !weatherOn || !weatherUrl) return;
+        let cancelled = false;
+        const load = async () => {
+            try {
+                const r = await fetch(weatherUrl).then((res) => res.json());
+                const frames = [...(r.radar?.past ?? []), ...(r.radar?.nowcast ?? [])];
+                const frame = frames[frames.length - 1];
+                if (cancelled || !frame) return;
+                const tiles = [`${r.host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`];
+                const src = map.getSource('weather') as maplibregl.RasterTileSource | undefined;
+                if (src) { src.setTiles(tiles); return; }
+                // RainViewer's 256px radar tiles only exist to zoom 7 (z8+ returns a "Zoom Level
+                // Not Supported" placeholder image); cap maxzoom so MapLibre overzooms the z7 tile
+                // instead - fine for coarse precipitation radar.
+                map.addSource('weather', { type: 'raster', tiles, tileSize: 256, maxzoom: 7 });
+                // Below our overlay layers so device/site markers stay on top.
+                map.addLayer({ id: 'weather', type: 'raster', source: 'weather', paint: { 'raster-opacity': 0.6 } }, 'backhaul-solid');
+            } catch (e) {
+                console.error('weather: radar load failed', e);
+            }
+        };
+        void load();
+        const timer = window.setInterval(() => void load(), 5 * 60 * 1000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+            if (map.getLayer('weather')) map.removeLayer('weather');
+            if (map.getSource('weather')) map.removeSource('weather');
+        };
+    }, [weatherOn, ready, weatherUrl]);
+
+    return (
+        <div className="relative h-full w-full">
+            <div ref={containerRef} className="h-full w-full bg-[#0d0d11]" />
+            {weatherUrl && (
+                <button
+                    type="button"
+                    onClick={() => setWeatherOn((v) => !v)}
+                    title="Toggle weather radar"
+                    className={`absolute right-3 top-3 z-10 rounded-lg px-3 py-1.5 text-xs font-medium ring-1 backdrop-blur transition-colors ${
+                        weatherOn
+                            ? 'bg-sky-500/20 text-sky-200 ring-sky-400/40'
+                            : 'bg-black/50 text-white/70 ring-white/15 hover:bg-black/70'
+                    }`}
+                >
+                    Weather
+                </button>
+            )}
+        </div>
+    );
 }

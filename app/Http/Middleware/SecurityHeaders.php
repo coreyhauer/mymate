@@ -27,8 +27,11 @@ class SecurityHeaders
         // Geo-overlay map tiles are loaded straight from the tile provider, so its host(s) are
         // allowed in img-src. Configurable (point at an internal tile server, or leave empty).
         $tileHosts = trim((string) config('mymate.map.tile_csp_hosts', ''));
+        // Weather-radar overlay hosts (tiles + the frames JSON) - allowed only when configured.
+        $weatherHosts = trim((string) config('mymate.map.weather.csp_hosts', ''));
         // MapLibre GL renders to a canvas/blob and draws sprite images; allow blob: images.
-        $imgSrc = trim("img-src 'self' data: blob: {$tileHosts}");
+        $imgSrc = trim("img-src 'self' data: blob: {$tileHosts} {$weatherHosts}");
+        $connectSrc = trim("connect-src 'self' ws: wss: {$weatherHosts}");
 
         $response->headers->set('Content-Security-Policy', implode('; ', [
             "default-src 'self'",
@@ -36,7 +39,7 @@ class SecurityHeaders
             "style-src 'self' 'unsafe-inline'",
             $imgSrc,
             "font-src 'self' data:",
-            "connect-src 'self' ws: wss:",
+            $connectSrc,
             // MapLibre GL spawns its render/worker threads from blob: URLs.
             "worker-src 'self' blob:",
             "child-src 'self' blob:",

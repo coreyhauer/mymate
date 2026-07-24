@@ -11,7 +11,7 @@ export function GeoRoot() {
     const { data: config } = useMapConfig();
 
     if (config?.basemap?.style_url) {
-        return <GeoMapLibre styleUrl={config.basemap.style_url} />;
+        return <GeoMapLibre styleUrl={config.basemap.style_url} weatherUrl={config.weather_radar_url ?? null} />;
     }
     return <GeoView />;
 }
