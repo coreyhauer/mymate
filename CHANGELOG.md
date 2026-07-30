@@ -32,6 +32,14 @@ of commit subjects.
   you to infer it.
 - **Geo map: layer toggles.** Devices and backhauls each have a switch on the map, remembered
   across reloads (both start on).
+- **Geo map: a MapLibre GL renderer for large fleets.** Set `MYMATE_MAP_STYLE_URL` and the geo view
+  switches from Leaflet raster to a WebGL vector basemap where the unit is the site, not the
+  device: sites cluster into regional bubbles when zoomed out, resolve to individual towers as you
+  zoom, show their up/down split on the marker, and expand to a device list on click. Individual
+  devices appear on drill-in. A find-a-site box flies to a hit and opens it, and the same layer
+  toggles apply. The basemap is self-hosted - `deploy/build/build-basemap.sh` builds pmtiles +
+  style + glyphs + sprite into `public/map`, so no third-party host is involved. Leaflet stays
+  the default when no style URL is configured.
 
 ### Fixed
 - **Map: device up/down toasts no longer pile up.** Down toasts were sticky (meant for error

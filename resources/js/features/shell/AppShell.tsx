@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
 import { ArrowsIn } from '@phosphor-icons/react';
-import { setWallboard, useView, useWallboard } from '../../lib/shellStore';
+import { setWallboard, useSelectedDeviceId, useView, useWallboard } from '../../lib/shellStore';
 import { TopBar } from './TopBar';
 import { NavRail } from './NavRail';
 import { UpdateNotice } from './UpdateNotice';
 import { MapArea } from '../geo/components/MapArea';
 import { DeviceInspector } from '../topology/components/DeviceInspector';
-import { GeoView } from '../geo/components/GeoView';
+import { GeoRoot } from '../geo/components/GeoRoot';
 import { DashboardView } from '../dashboard/components/DashboardView';
 import { DevicesView } from '../devices/components/DevicesView';
 import { DiscoveryView } from '../discovery/components/DiscoveryView';
@@ -32,6 +32,7 @@ import { ImportView } from '../import/components/ImportView';
  */
 export function AppShell() {
     const view = useView();
+    const selectedDeviceId = useSelectedDeviceId();
     const wallboard = useWallboard();
     const openOutages = useOutages('open');
 
@@ -61,7 +62,7 @@ export function AppShell() {
     const mainView = (
         <main className="relative min-w-0 flex-1">
             {view === 'map' && <MapArea />}
-            {view === 'geo' && <GeoView />}
+            {view === 'geo' && <GeoRoot />}
             {view === 'dashboard' && <DashboardView />}
             {view === 'devices' && <DevicesView />}
             {view === 'discovery' && <DiscoveryView />}
@@ -119,7 +120,7 @@ export function AppShell() {
             <div className="flex min-h-0 flex-1">
                 <NavRail outageCount={openOutages.data?.length ?? 0} />
                 {mainView}
-                {view === 'map' && <DeviceInspector />}
+                {(view === 'map' || (view === 'geo' && selectedDeviceId != null)) && <DeviceInspector />}
             </div>
 
             {/* One-time "update available" notice after login (per-version "don't show again"). */}
