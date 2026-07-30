@@ -203,7 +203,7 @@ function openSiteDevices(map: maplibregl.Map, siteName: string, coords: [number,
     popup.setLngLat(coords).setDOMContent(wrap).addTo(map);
 }
 
-export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
+export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weatherUrl: string | null }) {
     const { data: devices } = useGeoDevices();
     const { data: sites } = useSites();
     const { data: backhauls } = useBackhauls();
@@ -218,6 +218,8 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
     const backhaulsRef = useRef<Backhaul[]>([]);
     const [ready, setReady] = useState(false); // map style + our layers are in place
     const [layers, setLayers] = useState<LayerPrefs>(loadLayerPrefs);
+    // Weather rides the shared layer prefs, so the choice survives reloads like the others.
+    const weatherOn = layers.weather;
 
     const toggleLayer = (key: keyof LayerPrefs) =>
         setLayers((prev) => {
@@ -429,6 +431,41 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
         rebuild.current();
     }, [devices, sites, backhauls]);
 
+    // Weather radar overlay: fetch the latest RainViewer frame and add a raster layer under the
+    // markers, refreshing every few minutes while enabled. Removed cleanly when toggled off.
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!map || !ready || !weatherOn || !weatherUrl) return;
+        let cancelled = false;
+        const load = async () => {
+            try {
+                const r = await fetch(weatherUrl).then((res) => res.json());
+                const frames = [...(r.radar?.past ?? []), ...(r.radar?.nowcast ?? [])];
+                const frame = frames[frames.length - 1];
+                if (cancelled || !frame) return;
+                const tiles = [`${r.host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`];
+                const src = map.getSource('weather') as maplibregl.RasterTileSource | undefined;
+                if (src) { src.setTiles(tiles); return; }
+                // RainViewer's 256px radar tiles only exist to zoom 7 (z8+ returns a "Zoom Level
+                // Not Supported" placeholder image); cap maxzoom so MapLibre overzooms the z7 tile
+                // instead - fine for coarse precipitation radar.
+                map.addSource('weather', { type: 'raster', tiles, tileSize: 256, maxzoom: 7 });
+                // Below our overlay layers so device/site markers stay on top.
+                map.addLayer({ id: 'weather', type: 'raster', source: 'weather', paint: { 'raster-opacity': 0.6 } }, 'backhaul-solid');
+            } catch (e) {
+                console.error('weather: radar load failed', e);
+            }
+        };
+        void load();
+        const timer = window.setInterval(() => void load(), 5 * 60 * 1000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+            if (map.getLayer('weather')) map.removeLayer('weather');
+            if (map.getSource('weather')) map.removeSource('weather');
+        };
+    }, [weatherOn, ready, weatherUrl]);
+
     /**
      * Fly to a search hit. A site lands at a zoom where its own marker has split out of any
      * cluster and opens its device list, so "find North Tower" answers the question in one action
@@ -477,6 +514,9 @@ export function GeoMapLibre({ styleUrl }: { styleUrl: string }) {
             <div className="absolute bottom-4 left-3 z-10 flex gap-1.5">
                 <LayerToggle label="Sites" on={layers.sites} onClick={() => toggleLayer('sites')} title="Show site markers" />
                 <LayerToggle label="Backhauls" on={layers.backhauls} onClick={() => toggleLayer('backhauls')} title="Show site-to-site backhaul lines" />
+                {weatherUrl && (
+                    <LayerToggle label="Weather" on={weatherOn} onClick={() => toggleLayer('weather')} title="Toggle weather radar" />
+                )}
             </div>
         </div>
     );

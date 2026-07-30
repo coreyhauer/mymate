@@ -9,6 +9,8 @@ export interface MapConfig {
     // Vector basemap: when present the geo view renders MapLibre GL (clustered sites + devices
     // and backhaul lines) against this same-origin style; absent = Leaflet raster.
     basemap: { style_url: string } | null;
+    // RainViewer-style weather-maps.json for the optional radar overlay; null = no radar layer.
+    weather_radar_url: string | null;
 }
 
 /** Tile URL + attribution for the geo overlay (from server config). */

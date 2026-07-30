@@ -40,6 +40,11 @@ of commit subjects.
   toggles apply. The basemap is self-hosted - `deploy/build/build-basemap.sh` builds pmtiles +
   style + glyphs + sprite into `public/map`, so no third-party host is involved. Leaflet stays
   the default when no style URL is configured.
+- **Geo map: optional weather radar.** A toggle overlays precipitation radar under the markers,
+  refreshed every few minutes - a band of red radios that lines up with a squall line is weather,
+  not a fault. Configure with `map.weather.radar_url` (free keyless RainViewer by default, or point
+  it at your own tiler); clear it to remove the toggle. Remembered across reloads like the other
+  layers (starts off).
 
 ### Fixed
 - **Map: device up/down toasts no longer pile up.** Down toasts were sticky (meant for error
