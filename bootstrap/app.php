@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AuthenticateViaVoltron;
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
@@ -34,6 +35,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // Baseline security response headers on every request, web + api (
         // hardening - closes the security-checklist.md gap).
         $middleware->append(SecurityHeaders::class);
+
+        // gigtool Voltron SSO: when served behind the proxy, sign the user in from the
+        // nginx-injected X-Voltron-Email (validated by a shared secret). Appended to the web
+        // group so it runs after StartSession; the stateful api shares that session. Inert
+        // until mymate.voltron.secret is set. See AuthenticateViaVoltron.
+        $middleware->web(append: [AuthenticateViaVoltron::class]);
 
         // `admin` gates the operator-management write routes.
         $middleware->alias(['admin' => EnsureAdmin::class]);

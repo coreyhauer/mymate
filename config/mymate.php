@@ -1,6 +1,11 @@
 <?php
 
 return [
+    'voltron' => [
+        // Shared secret the gigtool Voltron nginx location injects (X-Voltron-Proxy-Secret)
+        // alongside X-Voltron-Email. Empty = SSO off (normal password login).
+        'secret' => (string) env('MYMATE_VOLTRON_SECRET', ''),
+    ],
 
     // Where engine logs (pollers/discovery/loop) go. Point at 'stack'/'stderr'/etc.
     // to reroute without touching code. See App\Support\EngineLog + config/logging.php.
