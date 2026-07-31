@@ -294,6 +294,24 @@ return [
             'nice' => 0,
         ],
 
+        // Live MTR traces: isolated queue + single process by default so a trippy live
+        // table an operator forgot to close can't starve pings/polls of workers.
+        // tries=1 - a killed/failed trace is surfaced as status=failed/stopped, never
+        // silently retried into a run the operator already closed.
+        'supervisor-trace' => [
+            'connection' => 'redis',
+            'queue' => ['trace'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => 300,
+            'nice' => 0,
+        ],
+
         // Dude imports (FR-Dude): isolated + long timeout - extraction (Python) plus
         // upserting millions of history rows must never block polling/discovery.
         'supervisor-import' => [
@@ -322,6 +340,7 @@ return [
             'supervisor-upgrade' => ['maxProcesses' => 4],
             'supervisor-backup' => ['maxProcesses' => 3],
             'supervisor-import' => ['maxProcesses' => 1],
+            'supervisor-trace' => ['maxProcesses' => 3],
         ],
 
         'local' => [
@@ -331,6 +350,7 @@ return [
             'supervisor-upgrade' => ['maxProcesses' => 1],
             'supervisor-backup' => ['maxProcesses' => 1],
             'supervisor-import' => ['maxProcesses' => 1],
+            'supervisor-trace' => ['maxProcesses' => 1],
         ],
     ],
 
