@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Globe, WifiHigh, Broadcast, HardDrives, ShareNetwork, StackSimple, Cube, type Icon } from '@phosphor-icons/react';
+import { Globe, WifiHigh, Broadcast, HardDrives, House, ShareNetwork, StackSimple, Cube, type Icon } from '@phosphor-icons/react';
 import type { DeviceType } from '../../../types';
 import { deviceIcon } from '../../../components/deviceIcons';
 import { isWall, wallToken } from '../../../lib/wall';
@@ -32,6 +32,8 @@ function familyIcon(type: DeviceType, model: string): Icon {
             return WifiHigh;
         case 'server':
             return HardDrives;
+        case 'ont':
+            return House; // customer-premises fiber ONU / monitored customer router
         default:
             return Cube;
     }

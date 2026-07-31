@@ -17,7 +17,7 @@ import type { Device } from '../../../types';
 
 type PendingUpgrade = { ids: number[]; willUpgrade: UpgradePlanRow[]; skipped: UpgradePlanRow[] };
 
-const DEVICE_TYPES: Device['device_type'][] = ['router', 'switch', 'ap', 'server', 'internet', 'unknown'];
+const DEVICE_TYPES: Device['device_type'][] = ['router', 'switch', 'ap', 'server', 'internet', 'ont', 'unknown'];
 const selectCls = 'rounded-lg bg-white/[0.04] px-2 py-1.5 text-xs text-white ring-1 ring-white/10 outline-none transition focus:ring-emerald-400/40';
 
 /** Full-page device management - add form on the left, the device list on the right. */

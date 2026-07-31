@@ -3,7 +3,7 @@ import { useDevices } from '../features/devices/api/getDevices';
 import { useMaps } from '../features/maps/api/maps';
 import type { AlertScope, DeviceType } from '../types';
 
-const DEVICE_TYPES: DeviceType[] = ['router', 'switch', 'ap', 'server', 'internet', 'unknown'];
+const DEVICE_TYPES: DeviceType[] = ['router', 'switch', 'ap', 'server', 'internet', 'ont', 'unknown'];
 
 const field =
     'w-full rounded-xl bg-white/[0.03] px-3 py-2 text-sm text-white ring-1 ring-white/10 outline-none ' +

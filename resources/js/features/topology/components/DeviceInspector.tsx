@@ -403,6 +403,7 @@ const DEVICE_TYPES: { value: DeviceType; label: string }[] = [
     { value: 'ap', label: 'Access point' },
     { value: 'server', label: 'Server' },
     { value: 'internet', label: 'Internet' },
+    { value: 'ont', label: 'Customer ONU/CPE' },
     { value: 'unknown', label: 'Unknown' },
 ];
 

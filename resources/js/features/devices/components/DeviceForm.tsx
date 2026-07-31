@@ -13,6 +13,7 @@ const DEVICE_TYPES: { value: DeviceType; label: string }[] = [
     { value: 'ap', label: 'Access point' },
     { value: 'server', label: 'Server' },
     { value: 'internet', label: 'Internet / upstream' },
+    { value: 'ont', label: 'Customer ONU/CPE' },
 ];
 
 const field =

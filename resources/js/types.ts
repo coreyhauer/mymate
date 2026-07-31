@@ -22,7 +22,7 @@ export interface Operator {
 
 export type PollMethod = 'snmp' | 'routeros' | 'none';
 export type DeviceStatus = 'up' | 'down' | 'unknown';
-export type DeviceType = 'router' | 'switch' | 'ap' | 'server' | 'internet' | 'unknown';
+export type DeviceType = 'router' | 'switch' | 'ap' | 'server' | 'internet' | 'ont' | 'unknown';
 
 export interface Device {
     id: number;
@@ -440,6 +440,7 @@ export interface Outage {
     cause: string | null;
     acknowledged: boolean;
     ack_note: string | null;
+    is_cpe: boolean;
 }
 
 // Live throughput event (App\Events\InterfaceUtilUpdated) - coalesced across devices.

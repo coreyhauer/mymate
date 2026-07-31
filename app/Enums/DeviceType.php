@@ -14,5 +14,6 @@ enum DeviceType: string
     case Ap = 'ap';
     case Server = 'server';
     case Internet = 'internet';
+    case Ont = 'ont';
     case Unknown = 'unknown';
 }
