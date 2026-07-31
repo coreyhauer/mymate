@@ -20,8 +20,12 @@ use App\Http\Controllers\Api\InterfaceSampleController;
 use App\Http\Controllers\Api\LinkController;
 use App\Http\Controllers\Api\MailSettingController;
 use App\Http\Controllers\Api\MapController;
+use App\Http\Controllers\Api\MapShareController;
+use App\Http\Controllers\Api\NoteController;
 use App\Http\Controllers\Api\OutageController;
+use App\Http\Controllers\Api\PublicWallController;
 use App\Http\Controllers\Api\SettingController;
+use App\Http\Controllers\Api\SonarTicketLinkController;
 use App\Http\Controllers\Api\SubnetController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Middleware\RestrictWritesToAdmins;
@@ -41,10 +45,10 @@ Route::post('contact', [ContactController::class, 'store'])->middleware('throttl
 // whitelist - no addresses or credentials cross this boundary (see PublicWallController).
 Route::middleware('throttle:120,1')->prefix('public/wall/{token}')
     ->where(['token' => '[A-Za-z0-9]+'])->group(function (): void {
-        Route::get('map', [\App\Http\Controllers\Api\PublicWallController::class, 'map'])->name('public.wall.map');
-        Route::get('devices', [\App\Http\Controllers\Api\PublicWallController::class, 'devices'])->name('public.wall.devices');
-        Route::get('devices/{device}/icon', [\App\Http\Controllers\Api\PublicWallController::class, 'icon'])->name('public.wall.icon');
-        Route::get('links', [\App\Http\Controllers\Api\PublicWallController::class, 'links'])->name('public.wall.links');
+        Route::get('map', [PublicWallController::class, 'map'])->name('public.wall.map');
+        Route::get('devices', [PublicWallController::class, 'devices'])->name('public.wall.devices');
+        Route::get('devices/{device}/icon', [PublicWallController::class, 'icon'])->name('public.wall.icon');
+        Route::get('links', [PublicWallController::class, 'links'])->name('public.wall.links');
     });
 
 // Login/logout live on the web group (session + CSRF) - see routes/web.php.
@@ -172,6 +176,30 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
     // Topology links (interface-to-interface). Update re-binds either end.
     Route::apiResource('links', LinkController::class)->only(['index', 'store', 'update', 'destroy']);
 
+    // Threaded notes attachable to a device, site, or link (NoteController). Non-admin-safe
+    // (see RestrictWritesToAdmins::OPERATOR_ACTION_ROUTES) - notes are a NOC log, not a
+    // change to the monitored fleet's config. PATCH/DELETE are keyed by the note id directly.
+    Route::get('devices/{device}/notes', [NoteController::class, 'forDevice'])->name('devices.notes');
+    Route::post('devices/{device}/notes', [NoteController::class, 'storeForDevice'])->name('devices.notes.store');
+    Route::get('sites/{site}/notes', [NoteController::class, 'forSite'])->name('sites.notes');
+    Route::post('sites/{site}/notes', [NoteController::class, 'storeForSite'])->name('sites.notes.store');
+    Route::get('links/{link}/notes', [NoteController::class, 'forLink'])->name('links.notes');
+    Route::post('links/{link}/notes', [NoteController::class, 'storeForLink'])->name('links.notes.store');
+    Route::patch('notes/{note}', [NoteController::class, 'update'])->name('notes.update');
+    Route::delete('notes/{note}', [NoteController::class, 'destroy'])->name('notes.destroy');
+
+    // Sonar tickets linked to a device, site, or link (SonarTicketLinkController). Same
+    // non-admin-safe rationale as notes - linking/unlinking a ticket never touches the
+    // monitored fleet, and My Mate only ever reads Sonar (never mutates a ticket there).
+    Route::get('devices/{device}/sonar-tickets', [SonarTicketLinkController::class, 'forDevice'])->name('devices.sonar-tickets');
+    Route::post('devices/{device}/sonar-tickets', [SonarTicketLinkController::class, 'storeForDevice'])->name('devices.sonar-tickets.store');
+    Route::get('sites/{site}/sonar-tickets', [SonarTicketLinkController::class, 'forSite'])->name('sites.sonar-tickets');
+    Route::post('sites/{site}/sonar-tickets', [SonarTicketLinkController::class, 'storeForSite'])->name('sites.sonar-tickets.store');
+    Route::get('links/{link}/sonar-tickets', [SonarTicketLinkController::class, 'forLink'])->name('links.sonar-tickets');
+    Route::post('links/{link}/sonar-tickets', [SonarTicketLinkController::class, 'storeForLink'])->name('links.sonar-tickets.store');
+    Route::delete('sonar-tickets/{sonarTicketLink}', [SonarTicketLinkController::class, 'destroy'])->name('sonar-tickets.destroy');
+    Route::post('sonar-tickets/{sonarTicketLink}/refresh', [SonarTicketLinkController::class, 'refresh'])->name('sonar-tickets.refresh');
+
     // Multiple maps: tree + per-map device placements/positions + inter-map links.
     Route::apiResource('maps', MapController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
     Route::patch('maps/{map}/positions/{device}', [MapController::class, 'savePosition'])->name('maps.positions.save');
@@ -192,10 +220,10 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
     Route::delete('maps/{map}/notes/{mapNote}', [MapController::class, 'destroyMapNote'])->name('maps.notes.destroy');
     // Public read-only wallboard share links (GitHub #15). Listing is read; minting/revoking are
     // writes, so RestrictWritesToAdmins keeps them admin-only like the rest of the map API.
-    Route::get('maps/{map}/shares', [\App\Http\Controllers\Api\MapShareController::class, 'index'])->name('maps.shares.index');
-    Route::post('maps/{map}/shares', [\App\Http\Controllers\Api\MapShareController::class, 'store'])->name('maps.shares.store');
-    Route::patch('maps/{map}/shares/{share}', [\App\Http\Controllers\Api\MapShareController::class, 'update'])->name('maps.shares.update');
-    Route::delete('maps/{map}/shares/{share}', [\App\Http\Controllers\Api\MapShareController::class, 'destroy'])->name('maps.shares.destroy');
+    Route::get('maps/{map}/shares', [MapShareController::class, 'index'])->name('maps.shares.index');
+    Route::post('maps/{map}/shares', [MapShareController::class, 'store'])->name('maps.shares.store');
+    Route::patch('maps/{map}/shares/{share}', [MapShareController::class, 'update'])->name('maps.shares.update');
+    Route::delete('maps/{map}/shares/{share}', [MapShareController::class, 'destroy'])->name('maps.shares.destroy');
 
     // Outage timeline - ?device_id= , ?state=open|closed.
     Route::get('outages', [OutageController::class, 'index'])->name('outages.index');

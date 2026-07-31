@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { LinkSimple, Pulse, X } from '@phosphor-icons/react';
 import { useInterfaceSamples } from '../api/getInterfaceSamples';
 import { useUpdateLink } from '../api/updateLink';
 import { InterfaceChart } from './InterfaceChart';
 import { EndPicker } from './LinkBinderDialog';
+import { NotesSection } from '../../annotations/components/NotesSection';
+import { SonarTicketsSection } from '../../annotations/components/SonarTicketsSection';
 import { useIsAdmin } from '../../auth/api/auth';
 import { pushToast } from '../../../lib/toast';
 import { formatRate } from '../../../lib/formatRate';
@@ -227,6 +229,21 @@ function EditPanel({ link, devices, onSaved }: { link: Link; devices: Device[]; 
     );
 }
 
+/** The dialog is the link's detail view: its traffic history, its wiring, and its annotations. */
+type LinkTab = 'history' | 'edit' | 'notes';
+
+const TAB_TITLE: Record<LinkTab, string> = { history: 'Link history', edit: 'Edit link', notes: 'Notes & tickets' };
+
+/** Section heading inside the Notes tab - matches the inspector's section labels. */
+function TabSection({ title, children }: { title: string; children: ReactNode }) {
+    return (
+        <div className="space-y-2.5">
+            <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-white/30">{title}</p>
+            {children}
+        </div>
+    );
+}
+
 export function LinkHistoryDialog({
     link,
     devices,
@@ -236,12 +253,12 @@ export function LinkHistoryDialog({
     link: Link;
     devices: Device[];
     onClose: () => void;
-    defaultTab?: 'history' | 'edit';
+    defaultTab?: LinkTab;
 }) {
     const isAdmin = useIsAdmin();
     const [windowSec, setWindowSec] = useState<number>(3600);
-    // Read-only viewers only ever see the history chart - the Edit tab is a write tool.
-    const [tab, setTab] = useState<'history' | 'edit'>(isAdmin ? defaultTab : 'history');
+    // Read-only viewers get history + notes; the Edit tab is a write tool, so it stays admin-only.
+    const [tab, setTab] = useState<LinkTab>(isAdmin || defaultTab !== 'edit' ? defaultTab : 'history');
     const nameOf = (id: number) => devices.find((d) => d.id === id)?.name ?? `device ${id}`;
     const aName = nameOf(link.a_device_id);
     const bName = nameOf(link.b_device_id);
@@ -272,27 +289,29 @@ export function LinkHistoryDialog({
                                 <Pulse weight="light" className="h-5 w-5" />
                             </span>
                             <div>
-                                <h2 className="text-base font-bold tracking-tight text-white">
-                                    {tab === 'history' ? 'Link history' : 'Edit link'}
-                                </h2>
+                                <h2 className="text-base font-bold tracking-tight text-white">{TAB_TITLE[tab]}</h2>
                                 <p className="text-xs text-white/40">
                                     {aName} - {bName}
                                 </p>
                             </div>
                         </div>
                         <div className="flex flex-wrap items-center justify-end gap-2">
-                            {/* History / Edit tabs - single-click friendly (no double-click).
-                                Edit is a write tool, so it\'s hidden from read-only viewers. */}
-                            {isAdmin && (
-                                <div className="flex items-center gap-0.5 rounded-full bg-white/5 p-0.5 text-[11px] ring-1 ring-white/10">
-                                    <button onClick={() => setTab('history')} className={tabBtn(tab === 'history')}>
-                                        History
-                                    </button>
+                            {/* History / Notes / Edit tabs - single-click friendly (no double-click).
+                                Edit is a write tool, so it\'s hidden from read-only viewers; notes and
+                                linked tickets are collaborative, so everyone gets them. */}
+                            <div className="flex items-center gap-0.5 rounded-full bg-white/5 p-0.5 text-[11px] ring-1 ring-white/10">
+                                <button onClick={() => setTab('history')} className={tabBtn(tab === 'history')}>
+                                    History
+                                </button>
+                                <button onClick={() => setTab('notes')} className={tabBtn(tab === 'notes')}>
+                                    Notes
+                                </button>
+                                {isAdmin && (
                                     <button onClick={() => setTab('edit')} className={tabBtn(tab === 'edit')}>
                                         Edit
                                     </button>
-                                </div>
-                            )}
+                                )}
+                            </div>
                             {tab === 'history' && (
                                 <div className="flex items-center gap-0.5 rounded-full bg-white/5 p-0.5 text-[11px] ring-1 ring-white/10">
                                     {WINDOWS.map(([label, secs]) => (
@@ -307,6 +326,16 @@ export function LinkHistoryDialog({
 
                     {tab === 'history' ? (
                         <LinkHistory link={link} aName={aName} bName={bName} windowSec={windowSec} />
+                    ) : tab === 'notes' ? (
+                        // A long thread must scroll inside the dialog rather than push it off-screen.
+                        <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1">
+                            <TabSection title="Notes">
+                                <NotesSection subject={{ kind: 'link', id: link.id }} />
+                            </TabSection>
+                            <TabSection title="Sonar tickets">
+                                <SonarTicketsSection subject={{ kind: 'link', id: link.id }} />
+                            </TabSection>
+                        </div>
                     ) : (
                         <EditPanel link={link} devices={devices} onSaved={() => setTab('history')} />
                     )}

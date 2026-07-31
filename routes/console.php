@@ -37,3 +37,8 @@ Schedule::call(function () {
         ->where('last_seen_at', '<', now()->subSeconds(90))
         ->update(['status' => AgentStatus::Offline]);
 })->everyMinute()->name('agent-reap-stale')->withoutOverlapping();
+
+// Sonar ticket links: keep OPEN/PENDING tickets' cached subject/status/etc fresh without
+// anyone opening the device/site/link (closed tickets don't change, so they're skipped). A
+// no-op when Sonar isn't configured (mymate.sonar.enabled derives from the API token).
+Schedule::command('mymate:sonar:refresh-tickets')->everyFifteenMinutes()->name('sonar-refresh-tickets')->withoutOverlapping();

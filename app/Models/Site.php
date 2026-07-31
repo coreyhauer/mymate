@@ -7,6 +7,7 @@ use Database\Factories\SiteFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * A physical location devices live at (see the create_sites_table migration for the why).
@@ -37,6 +38,18 @@ class Site extends Model
     public function devices(): HasMany
     {
         return $this->hasMany(Device::class);
+    }
+
+    /** Threaded operator notes left on this site. */
+    public function notes(): MorphMany
+    {
+        return $this->morphMany(Note::class, 'notable');
+    }
+
+    /** Sonar tickets linked to this site. */
+    public function sonarTicketLinks(): MorphMany
+    {
+        return $this->morphMany(SonarTicketLink::class, 'notable');
     }
 
     /** A site is only usable for placement once it has both coordinates. */

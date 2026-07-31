@@ -28,6 +28,8 @@ import { DeviceDialog } from '../../devices/components/DeviceDialog';
 import { ChartModal } from './ChartModal';
 import { TraceModal } from './TraceModal';
 import { BackupSection } from '../../backups/components/BackupSection';
+import { NotesSection } from '../../annotations/components/NotesSection';
+import { SonarTicketsSection } from '../../annotations/components/SonarTicketsSection';
 import { DeviceResources } from './DeviceResources';
 import { ConfirmDialog } from '../../../components/Dialog';
 import { MapDevicePalette } from './MapDevicePalette';
@@ -841,6 +843,16 @@ export function DeviceInspector() {
                         <LinkSimple weight="bold" className="h-3.5 w-3.5" /> Add link
                     </button>
                 )}
+            </Section>
+
+            {/* Operator annotations - notes and linked Sonar tickets. Both are keyed by the
+                generic annotation subject, so the same two sections serve sites and links too. */}
+            <Section title="Notes">
+                <NotesSection subject={{ kind: 'device', id: device.id }} />
+            </Section>
+
+            <Section title="Sonar tickets">
+                <SonarTicketsSection subject={{ kind: 'device', id: device.id }} />
             </Section>
 
             {activeMapId !== null && isAdmin && (

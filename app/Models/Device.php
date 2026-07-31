@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class Device extends Model
 {
@@ -149,5 +150,17 @@ class Device extends Model
     public function interfaces(): HasMany
     {
         return $this->hasMany(NetworkInterface::class);
+    }
+
+    /** Threaded operator notes left on this device. */
+    public function notes(): MorphMany
+    {
+        return $this->morphMany(Note::class, 'notable');
+    }
+
+    /** Sonar tickets linked to this device. */
+    public function sonarTicketLinks(): MorphMany
+    {
+        return $this->morphMany(SonarTicketLink::class, 'notable');
     }
 }

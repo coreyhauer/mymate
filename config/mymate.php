@@ -137,6 +137,26 @@ return [
         'default_speed_mbps' => (int) env('MYMATE_LINK_DEFAULT_SPEED_MBPS', 1000),
     ],
 
+    // Sonar ticket links (My Mate only ever READS Sonar's GraphQL ticketing API - it never
+    // creates/updates/closes tickets there). `enabled` derives from a non-empty token so the
+    // feature silently no-ops (empty ticket panel, scheduled refresh command skips) on an
+    // install that hasn't configured it, rather than failing every read.
+    'sonar' => [
+        'url' => env('MYMATE_SONAR_URL', 'https://gigfire.sonar.software/api/graphql'),
+        'token' => env('MYMATE_SONAR_TOKEN', ''),
+        // {id} is substituted with the ticket id (SonarTicketLinkResource::url). Shape
+        // confirmed against Sonar's SPA (hash routing under /app), e.g. ticket 89172 lives at
+        // https://gigfire.sonar.software/app#/tickets/show/89172 - kept configurable anyway.
+        'ticket_url_template' => env('MYMATE_SONAR_TICKET_URL', 'https://gigfire.sonar.software/app#/tickets/show/{id}'),
+        // How long a cached ticket link is trusted before a read triggers a refresh (s).
+        'cache_ttl' => (int) env('MYMATE_SONAR_CACHE_TTL', 300),
+        'enabled' => (bool) env('MYMATE_SONAR_TOKEN', ''),
+        // Cap on how many open-ticket links RefreshSonarTicketLinksCommand touches per run
+        // (one HTTP request regardless, via GraphQL aliasing - see SonarClient) - keeps a
+        // single scheduled run well inside the 5000-req/token budget even on a big install.
+        'refresh_batch' => (int) env('MYMATE_SONAR_REFRESH_BATCH', 200),
+    ],
+
     // Geographic map overlay (GitHub #11). Raster tiles are loaded straight from the tile
     // provider by the browser, so its host is added to the CSP img-src (SecurityHeaders).
     'map' => [
