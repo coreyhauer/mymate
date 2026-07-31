@@ -98,6 +98,9 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
         ->middleware('throttle:10,1')->name('devices.upgrade.preflight');
     Route::post('devices/upgrade', [DeviceController::class, 'upgrade'])
         ->middleware('throttle:10,1')->name('devices.upgrade');
+    // Lightweight status tallies for the top bar. Before the resource so `devices/stats`
+    // isn't shadowed by `devices/{device}`.
+    Route::get('devices/stats', [DeviceController::class, 'stats'])->name('devices.stats');
     // Acknowledge / clear a known-down device so it drops out of the actionable outage list.
     Route::post('devices/{device}/ack', [DeviceController::class, 'acknowledge'])->name('devices.ack');
     Route::delete('devices/{device}/ack', [DeviceController::class, 'unacknowledge'])->name('devices.unack');

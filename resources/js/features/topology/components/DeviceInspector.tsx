@@ -12,7 +12,7 @@ import {
     setInspectorOpen,
     type IfaceFilter,
 } from '../../../lib/shellStore';
-import { useDevices } from '../../devices/api/getDevices';
+import { useDevice, useDevices } from '../../devices/api/getDevices';
 import { useDeviceInterfaces } from '../api/getDeviceInterfaces';
 import { useDiscoverDevice } from '../api/discoverDevice';
 import { useUpdateDevice } from '../../devices/api/updateDevice';
@@ -490,7 +490,15 @@ export function DeviceInspector() {
     const { data: mapDetail } = useMap(activeMapId);
     const addToMap = useAddDeviceToMap();
     const removeFromMap = useRemoveDeviceFromMap();
-    const device = devices?.find((d) => d.id === id);
+    // Resolve the selection from the big list when it's already loaded, and fall back to a direct
+    // per-device fetch when it isn't. Without the fallback, clicking a device on the geo map (whose
+    // own compact feed loads long before the ~36 MB /devices list) resolved to nothing and dropped
+    // the panel into its nothing-selected state - the "Map tools" card.
+    const listDevice = devices?.find((d) => d.id === id);
+    const { data: fetchedDevice, isLoading: deviceLoading } = useDevice(
+        id !== null && !listDevice ? id : null,
+    );
+    const device = listDevice ?? (fetchedDevice?.id === id ? fetchedDevice : undefined);
 
     // Default the selection to the upstream/root device ON THE CURRENT MAP on the *first* load
     // (prefer an `internet`/uplink node, else a parentless one) - but only among devices actually
@@ -527,6 +535,12 @@ export function DeviceInspector() {
                 {devices && devices.length === 0 ? (
                     <div className="grid flex-1 place-items-center px-6 text-center text-sm text-white/35">
                         No devices yet - add one to see its details here.
+                    </div>
+                ) : id !== null && deviceLoading ? (
+                    // Something IS selected and still resolving - showing the map tools here is
+                    // what made a slow lookup look like a broken click.
+                    <div className="grid flex-1 place-items-center px-6 text-center text-sm text-white/35">
+                        Loading device...
                     </div>
                 ) : (
                     <MapDevicePalette />

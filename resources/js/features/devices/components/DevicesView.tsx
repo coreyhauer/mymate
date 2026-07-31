@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TrashSimple, ArrowRight, ListDashes, DownloadSimple, PencilSimple, Pause, Play, MagnifyingGlass } from '@phosphor-icons/react';
 import { useDevices } from '../api/getDevices';
 import { useDeleteDevice } from '../api/deleteDevice';
@@ -60,6 +60,15 @@ export function DevicesView() {
                 (d.vendor ?? '').toLowerCase().includes(q)),
     );
     const filtersActive = q !== '' || statusFilter !== 'all' || typeFilter !== 'all' || monitoredFilter !== 'all';
+
+    // Windowed render: only mount the first `limit` filtered rows (a 25k-device fleet would
+    // otherwise mount 25k DOM nodes and hang the tab). "Show more" grows the window; any
+    // filter/search change resets it so a fresh query starts at the top.
+    const PAGE = 250;
+    const [limit, setLimit] = useState(PAGE);
+    useEffect(() => setLimit(PAGE), [q, statusFilter, typeFilter, monitoredFilter]);
+    const shown = filtered.slice(0, limit);
+
     const allSelected = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
 
     function open(id: number) {
@@ -264,7 +273,7 @@ export function DevicesView() {
                         )}
 
                         <ul className="min-w-0 space-y-0.5">
-                            {filtered.map((d) => {
+                            {shown.map((d) => {
                                 const upgradable = d.poll_method === 'routeros'; // only RouterOS can be upgraded
                                 return (
                                     <li
@@ -366,6 +375,20 @@ export function DevicesView() {
                                 );
                             })}
                         </ul>
+
+                        {filtered.length > limit && (
+                            <div className="mt-2 flex items-center justify-between gap-3 px-1 text-xs text-white/40">
+                                <span className="tabular-nums">
+                                    Showing {shown.length.toLocaleString()} of {filtered.length.toLocaleString()}
+                                </span>
+                                <button
+                                    onClick={() => setLimit((l) => l + PAGE * 2)}
+                                    className="rounded-full bg-white/[0.06] px-3 py-1 font-medium text-white/70 ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
+                                >
+                                    Show more
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

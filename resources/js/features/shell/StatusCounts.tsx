@@ -1,4 +1,4 @@
-import { useDevices } from '../devices/api/getDevices';
+import { useDeviceStats } from '../devices/api/getDevices';
 import type { DeviceStatus } from '../../types';
 
 const tone: Record<DeviceStatus, string> = {
@@ -13,14 +13,17 @@ const dot: Record<DeviceStatus, string> = {
 };
 const short: Record<DeviceStatus, string> = { up: 'up', down: 'down', unknown: 'unk' };
 
-/** Live up/down/unknown tallies for the top bar, derived from the device snapshot. */
+/** Live up/down/unknown tallies for the top bar, from the lightweight stats endpoint. */
 export function StatusCounts() {
-    const { data: devices } = useDevices();
-    // Count only monitored devices. A paused/acked device (monitored=false) is deliberately not
-    // being polled, so its stale status shouldn't inflate the up/down tallies - the pill reflects
-    // the health of what's actually watched.
-    const counts: Record<DeviceStatus, number> = { up: 0, down: 0, unknown: 0 };
-    for (const d of devices ?? []) if (d.monitored) counts[d.status] += 1;
+    // A single server-side GROUP BY over monitored devices - instant and independent of the full
+    // (~35 MB) device list, so the header is correct even while that list is still loading. A
+    // paused/acked device (monitored=false) is deliberately excluded, matching the poller.
+    const { data: stats } = useDeviceStats();
+    const counts: Record<DeviceStatus, number> = {
+        up: stats?.up ?? 0,
+        down: stats?.down ?? 0,
+        unknown: stats?.unknown ?? 0,
+    };
 
     return (
         <div className="flex items-center gap-1.5">

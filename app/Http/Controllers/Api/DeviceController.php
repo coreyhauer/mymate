@@ -31,6 +31,28 @@ class DeviceController extends Controller
         return DeviceResource::collection(Device::with(['parent', 'site'])->orderBy('name')->get());
     }
 
+    /**
+     * Lightweight up/down/unknown tallies for the top bar - a single GROUP BY instead of
+     * shipping the whole (25k+, ~35 MB) device collection just to count statuses. Only
+     * monitored devices count, matching StatusCounts. Kept tiny so the header is instant and
+     * stays correct even when the full /devices list is slow or fails to load.
+     */
+    public function stats(): JsonResponse
+    {
+        $rows = Device::query()
+            ->where('monitored', true)
+            ->selectRaw('status, count(*) as c')
+            ->groupBy('status')
+            ->pluck('c', 'status');
+
+        return response()->json(['data' => [
+            'up' => (int) $rows->get('up', 0),
+            'down' => (int) $rows->get('down', 0),
+            'unknown' => (int) $rows->get('unknown', 0),
+            'total' => (int) $rows->sum(),
+        ]]);
+    }
+
     public function store(StoreDeviceRequest $request, CreateDevice $createDevice): JsonResponse
     {
         $device = $createDevice($request->validated());
