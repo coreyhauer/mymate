@@ -3,6 +3,7 @@
 namespace App\Services\Polling;
 
 use App\Enums\PollMethod;
+use App\Jobs\DiscoverInterfacesBatchJob;
 use App\Jobs\PollDeviceMetricsBatchJob;
 use App\Jobs\PollInterfacesBatchJob;
 use App\Jobs\PollSensorsBatchJob;
@@ -113,6 +114,45 @@ class PollDispatcher
 
         foreach ($byShard as $shard => $shardIds) {
             PollSensorsBatchJob::dispatch($shard, $shardIds);
+        }
+
+        return count($byShard);
+    }
+
+    /**
+     * Interface (re)discovery, sharded onto the isolated `discover` queue.
+     *
+     * This used to dispatch one job per device straight onto `poll` - ~17k jobs every
+     * discover_interval, unfiltered by `monitored`. The poll workers couldn't drain a fleet's
+     * worth of full ifTable walks inside the interval, so the backlog compounded every cycle
+     * until the queue was ~9.6M deep and days behind, which starved the throughput jobs that
+     * write utilisation. Sharding makes the job count depend on shard count rather than fleet
+     * size, and its own queue means a slow sweep can only ever delay discovery.
+     *
+     * @return int number of batch jobs dispatched (non-empty shards)
+     */
+    public function dispatchDiscovery(): int
+    {
+        $shards = max(1, (int) config('mymate.poll.discover_shards', 32));
+
+        // Same fleet the throughput poller uses - including `monitored`, which the old
+        // per-device fan-out skipped, so paused devices were being rediscovered forever.
+        $ids = Device::where('monitored', true)
+            ->whereNull('agent_id') // agent devices are (re)discovered by their agent
+            ->whereIn('poll_method', PollMethod::throughputMethods())
+            ->pluck('id');
+        if ($ids->isEmpty()) {
+            return 0;
+        }
+
+        /** @var array<int, list<int>> $byShard */
+        $byShard = [];
+        foreach ($ids as $id) {
+            $byShard[crc32((string) $id) % $shards][] = (int) $id;
+        }
+
+        foreach ($byShard as $shard => $shardIds) {
+            DiscoverInterfacesBatchJob::dispatch($shard, $shardIds);
         }
 
         return count($byShard);

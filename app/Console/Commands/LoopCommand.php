@@ -3,12 +3,9 @@
 namespace App\Console\Commands;
 
 use App\Actions\History\ManageHistoryPartitions;
-use App\Enums\PollMethod;
-use App\Jobs\DiscoverInterfacesJob;
 use App\Jobs\EvaluateAlertsJob;
 use App\Jobs\ManageHistoryPartitionsJob;
 use App\Jobs\ScanSubnetJob;
-use App\Models\Device;
 use App\Models\Subnet;
 use App\Services\Polling\PingDispatcher;
 use App\Services\Polling\PollDispatcher;
@@ -36,7 +33,7 @@ class LoopCommand extends Command
     {
         if ($this->option('discover')) {
             $n = $this->dispatchDiscovery();
-            $this->info("Dispatched discovery for {$n} device(s).");
+            $this->info("Dispatched {$n} interface-discovery batch job(s).");
 
             return self::SUCCESS;
         }
@@ -167,10 +164,10 @@ class LoopCommand extends Command
         return app(PollDispatcher::class)->dispatchMetrics();
     }
 
-    /** Dispatch an interface-discovery job per pollable device. */
+    /** Dispatch the sharded interface-discovery batch jobs (isolated `discover` queue). */
     private function dispatchDiscovery(): int
     {
-        return $this->eachPollable(fn (int $id) => DiscoverInterfacesJob::dispatch($id));
+        return app(PollDispatcher::class)->dispatchDiscovery();
     }
 
     /**
@@ -192,21 +189,5 @@ class LoopCommand extends Command
         $due->each(fn (Subnet $s) => ScanSubnetJob::dispatch($s->id));
 
         return $due->count();
-    }
-
-    /**
-     * Run $dispatch for each device we have a throughput driver for. Both throughput
-     * methods have a driver, so periodic (re)discovery covers SNMP **and** RouterOS
-     *.
-     * Ping-only devices are excluded - no driver, so
-     * neither throughput-polled nor discovered (they still get pinged elsewhere).
-     */
-    private function eachPollable(callable $dispatch): int
-    {
-        $ids = Device::whereNull('agent_id') // agent devices are (re)discovered by their agent
-            ->whereIn('poll_method', PollMethod::throughputMethods())->pluck('id');
-        $ids->each($dispatch);
-
-        return $ids->count();
     }
 }

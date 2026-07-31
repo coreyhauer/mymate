@@ -220,13 +220,31 @@ return [
             'queue' => ['poll'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'size',
-            'maxProcesses' => 3,
+            'maxProcesses' => (int) env('MYMATE_POLL_PROCESSES', 6),
             'maxTime' => 0,
             'maxJobs' => 0,
             'memory' => 128,
             'tries' => 1,
             'timeout' => 60,
             'nice' => 0,
+        ],
+
+        // Interface (re)discovery: isolated from `poll` on purpose. A discovery sweep walks far
+        // more of the MIB than a throughput tick, so on its own queue it can only ever delay
+        // itself - sharing `poll` is what starved throughput (and therefore utilisation) before.
+        // Long timeout: each job is a whole shard of the fleet, not one device.
+        'supervisor-discover' => [
+            'connection' => 'redis',
+            'queue' => ['discover'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'size',
+            'maxProcesses' => (int) env('MYMATE_DISCOVER_PROCESSES', 4),
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => 900,
+            'nice' => 5, // yield to polling under contention
         ],
 
         // Discovery scans: isolated so a slow sweep never delays polling.

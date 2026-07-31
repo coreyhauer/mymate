@@ -67,6 +67,13 @@ return [
         // the byte/interface caps below.
         'shards' => (int) env('MYMATE_POLL_SHARDS', 16),
 
+        // Interface discovery is sharded separately and onto its own queue. Keep this WELL
+        // below `shards`: discovery is a full MIB walk on a slow cadence, so a handful of
+        // long-running batch jobs is the right shape - the failure mode to avoid is a job
+        // count that scales with the fleet (it used to be one job per device, which buried
+        // the throughput queue millions deep and stopped utilisation being recorded at all).
+        'discover_shards' => (int) env('MYMATE_DISCOVER_SHARDS', 32),
+
         'broadcast' => [
             'enabled' => (bool) env('MYMATE_BROADCAST_UTIL', true),
             // Two independent caps on one coalesced util event - whichever is hit
