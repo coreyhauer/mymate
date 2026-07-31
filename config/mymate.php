@@ -193,6 +193,8 @@ return [
         // Seconds between metric polls. Slower than throughput - cpu/mem/temp move
         // gradually and the SNMP walks (hrProcessorLoad, hrStorage) aren't free.
         'interval' => (int) env('MYMATE_DEVICE_METRICS_INTERVAL', 30),
+        // Seconds between live-frequency SNMP reads per device (RF channel barely moves).
+        'frequency_interval' => (int) env('MYMATE_FREQUENCY_INTERVAL', 600),
         'broadcast' => (bool) env('MYMATE_BROADCAST_METRICS', true),
 
         // Per-vendor SNMP OID profiles. Picked by a case-insensitive substring match on

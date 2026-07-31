@@ -27,6 +27,7 @@ class SnmpDeviceMetricsDriver implements DeviceMetricsDriver
         $profile = $this->profiles->for($device);
 
         $wl = $this->wireless($host, $community, $profile);
+        $rf = $this->frequencyIfDue($device, $host, $community);
 
         return new DeviceMetrics(
             cpuPct: DeviceMetrics::clampPct($this->cpu($host, $community, $profile)),
@@ -36,7 +37,65 @@ class SnmpDeviceMetricsDriver implements DeviceMetricsDriver
             snrDb: $wl['snr'],
             ccqPct: DeviceMetrics::clampPct($wl['ccq']),
             wirelessClients: $wl['clients'],
+            freqMhz: $rf['freq'],
+            chanWidthMhz: $rf['width'],
+            freqBackupMhz: $rf['backup'],
+            chanWidthBackupMhz: $rf['backup_width'],
         );
+    }
+
+    /**
+     * Live operating frequency for Ubiquiti radios, read at most once per
+     * config('mymate.device_metrics.frequency_interval') per device (RF channel barely moves,
+     * and this is extra GETs on top of the metric read). Returns all-null when not a Ubiquiti
+     * radio or not yet due, so the persister leaves any stored value untouched.
+     *
+     * Candidate OIDs are tried cheapest-common-first; a radio only answers its own family:
+     *   airMAX    UBNT-AirMAX-MIB::ubntRadioFreq         41112.1.4.1.1.4.1   (MHz)
+     *   AF60/Wave UI-AF60-MIB::af60Frequency / Chanbw    41112.1.11.1.1.2.1 / .3.1 (MHz)
+     *   airFiber  UBNT-AirFIBER-MIB::txFrequency         41112.1.3.1.1.5.1
+     *   AF-LTU    UBNT-AFLTU-MIB::afLTUFrequency         41112.1.10.1.2.2.0  (Hz)
+     * A 60 GHz Wave link that also answers the airMAX OID yields the 5 GHz failover as backup.
+     *
+     * @return array{freq:?int, width:?int, backup:?int, backup_width:?int}
+     */
+    private function frequencyIfDue(Device $device, string $host, SnmpCredential $community): array
+    {
+        $none = ['freq' => null, 'width' => null, 'backup' => null, 'backup_width' => null];
+
+        if (! str_contains(strtolower((string) $device->vendor), 'ubiquiti')) {
+            return $none;
+        }
+        $interval = (int) config('mymate.device_metrics.frequency_interval', 600);
+        if ($device->freq_at !== null && $device->freq_at->gt(now()->subSeconds($interval))) {
+            return $none;
+        }
+
+        try {
+            $mhz = fn (string $oid): ?int => (($v = $this->firstNumeric($this->snmp->get($host, $community, [$oid]))) !== null && $v > 0)
+                ? (int) ($v > 1_000_000 ? round($v / 1_000_000) : round($v)) // some OIDs report Hz
+                : null;
+
+            $af60 = $mhz('.1.3.6.1.4.1.41112.1.11.1.1.2.1');
+            $airmax = $mhz('.1.3.6.1.4.1.41112.1.4.1.1.4.1');
+
+            if ($af60 !== null) { // 60 GHz Wave: primary 60 GHz + width, airMAX OID (if any) is the 5 GHz backup
+                return [
+                    'freq' => $af60,
+                    'width' => $mhz('.1.3.6.1.4.1.41112.1.11.1.1.3.1'),
+                    'backup' => $airmax,
+                    'backup_width' => null,
+                ];
+            }
+            if ($airmax !== null) {
+                return ['freq' => $airmax, 'width' => null, 'backup' => null, 'backup_width' => null];
+            }
+            $other = $mhz('.1.3.6.1.4.1.41112.1.10.1.2.2.0') ?? $mhz('.1.3.6.1.4.1.41112.1.3.1.1.5.1');
+
+            return ['freq' => $other, 'width' => null, 'backup' => null, 'backup_width' => null];
+        } catch (\Throwable) {
+            return $none; // frequency is best-effort - never let it break the metric read
+        }
     }
 
     /**

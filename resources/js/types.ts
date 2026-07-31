@@ -83,6 +83,11 @@ export interface Device {
     snr_db: number | null;
     ccq_pct: number | null;
     wireless_clients: number | null;
+    freq_mhz: number | null;
+    chan_width_mhz: number | null;
+    freq_backup_mhz: number | null;
+    chan_width_backup_mhz: number | null;
+    freq_at: string | null;
     ospf_neighbors: number | null;
     rtt_ms: number | null;
     loss_pct: number | null;

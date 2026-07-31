@@ -8,6 +8,10 @@ use Illuminate\Support\Facades\Schema;
  * GitHub #15: anonymous wallboard links. A share is an unguessable token bound to one map
  * that grants a read-only, no-login view of that map's wallboard. Revocable (delete the row,
  * or flip `enabled`). Nothing durable lives behind it - the public endpoints only ever read.
+ *
+ * Shares its `2026_07_24_000000` stamp with add_frequency_to_devices - harmless (different
+ * filenames sort deterministically, and the two touch different tables); renaming either would
+ * re-run it on installs that already applied it under the original name.
  */
 return new class extends Migration
 {

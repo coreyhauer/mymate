@@ -71,14 +71,14 @@ class PollDeviceMetrics
                 $this->writeOspfCosts($device, $read['costs']);
             }
 
-            if ($metrics->isEmpty() && $ospf === null) {
+            if ($metrics->isEmpty() && $ospf === null && $metrics->freqMhz === null) {
                 continue; // nothing readable - don't stamp metrics_at or write fake zeroes
             }
 
             // Latest values onto the device row (individually so one persist keeps the
             // others - no bulk upsert here, the metrics fleet is device-count, not
             // interface-count, so per-device updates are cheap enough).
-            $device->forceFill([
+            $fill = [
                 'cpu_pct' => $metrics->cpuPct,
                 'mem_used_pct' => $metrics->memUsedPct,
                 'temp_c' => $metrics->tempC,
@@ -88,7 +88,17 @@ class PollDeviceMetrics
                 'wireless_clients' => $metrics->wirelessClients,
                 'ospf_neighbors' => $ospf,
                 'metrics_at' => now(),
-            ])->save();
+            ];
+            // Frequency is read on its own slower cadence; only overwrite the stored channel when
+            // this cycle actually read it, so off-cycles keep the last-known value.
+            if ($metrics->freqMhz !== null) {
+                $fill['freq_mhz'] = $metrics->freqMhz;
+                $fill['chan_width_mhz'] = $metrics->chanWidthMhz;
+                $fill['freq_backup_mhz'] = $metrics->freqBackupMhz;
+                $fill['chan_width_backup_mhz'] = $metrics->chanWidthBackupMhz;
+                $fill['freq_at'] = now();
+            }
+            $device->forceFill($fill)->save();
 
             $frames[] = [
                 'device_id' => $device->id,

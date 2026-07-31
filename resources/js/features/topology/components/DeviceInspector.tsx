@@ -19,6 +19,7 @@ import { useUpdateDevice } from '../../devices/api/updateDevice';
 import { useUpgradeDevices } from '../../devices/api/upgradeDevices';
 import { useCredentials } from '../../settings/api/credentials';
 import { useLinks } from '../api/getLinks';
+import { formatFreq, stripFreqToken } from '../../../lib/frequency';
 import { useDeleteLink } from '../api/deleteLink';
 import { useMap, useAddDeviceToMap, useRemoveDeviceFromMap } from '../../maps/api/maps';
 import { LinkHistoryDialog } from './LinkHistoryDialog';
@@ -605,7 +606,27 @@ export function DeviceInspector() {
                         </span>
                     )}
                     <div className="min-w-0">
-                        <div className="truncate text-base font-bold tracking-tight text-white">{device.name}</div>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate text-base font-bold tracking-tight text-white">
+                                {device.freq_mhz != null ? stripFreqToken(device.name, device.freq_mhz) : device.name}
+                            </span>
+                            {device.freq_mhz != null && (
+                                <span
+                                    title={`Live radio frequency${device.freq_at ? ` · ${new Date(device.freq_at).toLocaleString()}` : ''}`}
+                                    className="shrink-0 rounded-full bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-tight text-emerald-300 ring-1 ring-emerald-400/20"
+                                >
+                                    {formatFreq(device.freq_mhz, device.chan_width_mhz)}
+                                </span>
+                            )}
+                            {device.freq_backup_mhz != null && (
+                                <span
+                                    title="5 GHz failover radio"
+                                    className="shrink-0 rounded-full bg-sky-400/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-tight text-sky-300 ring-1 ring-sky-400/20"
+                                >
+                                    {formatFreq(device.freq_backup_mhz, device.chan_width_backup_mhz)}
+                                </span>
+                            )}
+                        </div>
                         <div className="truncate text-[11px] text-white/40">
                             {device.model ?? device.vendor ?? device.mgmt_ip}
                         </div>

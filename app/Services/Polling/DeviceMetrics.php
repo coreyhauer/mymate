@@ -19,6 +19,14 @@ class DeviceMetrics
         public readonly ?float $ccqPct = null,
         public readonly ?int $wirelessClients = null,
         public readonly ?int $ospfNeighbors = null,
+        // Live RF channel. freqMhz/chanWidthMhz are the operating radio; the *Backup pair is
+        // the 5 GHz failover on 60 GHz Wave links. Null means "not read this cycle" (frequency
+        // is polled far less often than cpu/rf) - the persister leaves the stored value alone
+        // rather than nulling it, so these never participate in isEmpty().
+        public readonly ?int $freqMhz = null,
+        public readonly ?int $chanWidthMhz = null,
+        public readonly ?int $freqBackupMhz = null,
+        public readonly ?int $chanWidthBackupMhz = null,
     ) {}
 
     /** True when nothing was read - the poller skips these so history has no fake zeroes. */
