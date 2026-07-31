@@ -17,6 +17,7 @@ export interface Site {
 export const siteKeys = {
     all: ['sites'] as const,
     list: () => [...siteKeys.all, 'list'] as const,
+    detail: (id: number) => [...siteKeys.all, 'detail', id] as const,
 };
 
 /** A device as the geo map needs it - compact, so the map doesn't pull the full device list. */
@@ -37,6 +38,12 @@ export interface GeoDevice {
     cust_count: number | null;
     /** Of cust_count, how many are currently down (their CPE not seen in the last poll). */
     cust_down: number | null;
+    /**
+     * Management IP, when the feed carries it. Optional: /geo/devices is deliberately compact and
+     * doesn't select it today, so the site inspector renders the IP only if it ever appears -
+     * never an empty column.
+     */
+    mgmt_ip?: string | null;
 }
 
 /**
@@ -82,5 +89,21 @@ export function useSites() {
             const { data } = await apiClient.get<{ data: Site[] }>('/sites');
             return data.data;
         },
+    });
+}
+
+/**
+ * One site. The inspector normally resolves its site out of the already-loaded list; this is the
+ * fallback for when it isn't loaded yet (deep link, cache miss), the same shape the device
+ * inspector uses. Disabled until a site is selected.
+ */
+export function useSite(id: number | null) {
+    return useQuery({
+        queryKey: siteKeys.detail(id ?? 0),
+        queryFn: async (): Promise<Site> => {
+            const { data } = await apiClient.get<{ data: Site }>(`/sites/${id}`);
+            return data.data;
+        },
+        enabled: id !== null,
     });
 }

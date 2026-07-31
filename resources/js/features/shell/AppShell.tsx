@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import { ArrowsIn } from '@phosphor-icons/react';
-import { setWallboard, useSelectedDeviceId, useView, useWallboard } from '../../lib/shellStore';
+import { setWallboard, useSelectedDeviceId, useSelectedSiteId, useView, useWallboard } from '../../lib/shellStore';
 import { TopBar } from './TopBar';
 import { NavRail } from './NavRail';
 import { UpdateNotice } from './UpdateNotice';
 import { MapArea } from '../geo/components/MapArea';
 import { DeviceInspector } from '../topology/components/DeviceInspector';
 import { GeoRoot } from '../geo/components/GeoRoot';
+import { SiteInspector } from '../geo/components/SiteInspector';
 import { DashboardView } from '../dashboard/components/DashboardView';
 import { DevicesView } from '../devices/components/DevicesView';
 import { DiscoveryView } from '../discovery/components/DiscoveryView';
@@ -31,6 +32,7 @@ import { ImportView } from '../import/components/ImportView';
 export function AppShell() {
     const view = useView();
     const selectedDeviceId = useSelectedDeviceId();
+    const selectedSiteId = useSelectedSiteId();
     const wallboard = useWallboard();
     const openOutages = useOutages('open');
 
@@ -116,7 +118,12 @@ export function AppShell() {
             <div className="flex min-h-0 flex-1">
                 <NavRail outageCount={openOutages.data?.length ?? 0} />
                 {mainView}
+                {/* One rail, one inspector: the store keeps the device and site selections mutually
+                    exclusive, and the site guard below is belt-and-braces so they can never stack. */}
                 {(view === 'map' || (view === 'geo' && selectedDeviceId != null)) && <DeviceInspector />}
+                {view === 'geo' && selectedDeviceId == null && selectedSiteId != null && (
+                    <SiteInspector siteId={selectedSiteId} />
+                )}
             </div>
 
             {/* One-time "update available" notice after login (per-version "don't show again"). */}

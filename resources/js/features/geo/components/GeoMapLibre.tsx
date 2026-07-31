@@ -9,7 +9,8 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
 import { useBackhauls, useGeoDevices, useSites, type Backhaul, type GeoDevice, type Site } from '../api/sites';
 import { useMapChannel } from '../../topology/hooks/useMapChannel';
-import { selectDevice } from '../../../lib/shellStore';
+import { selectDevice, selectSite, setInspectorOpen } from '../../../lib/shellStore';
+import { GeoSearch, type GeoHit } from './GeoSearch';
 
 /**
  * MapLibre GL geographic view (LTD high-scale renderer).
@@ -17,9 +18,13 @@ import { selectDevice } from '../../../lib/shellStore';
  * A WISP's real map unit is the SITE (tower / fiber cabinet), not the individual radio, so this
  * renders one marker per site - positioned at its coordinates, sized by how much gear it carries,
  * coloured by live health (any device down -> red). Zoomed out, sites cluster into regional
- * groups; zoom in and they resolve to individual sites; zoom in further (or click a site) and the
- * individual devices appear. Device data comes from a compact geo feed (/geo/devices), not the
- * full device resource, so opening the map doesn't pull megabytes.
+ * groups; zoom in and they resolve to individual sites; zoom in further the individual devices
+ * appear. Device data comes from a compact geo feed (/geo/devices), not the full device resource,
+ * so opening the map doesn't pull megabytes.
+ *
+ * Clicking a site selects it, which opens the SITE INSPECTOR in the shell's right rail (it used
+ * to build a raw-DOM MapLibre popup of the site's devices). The panel carries the same device
+ * list plus the site's notes and linked Sonar tickets, so nothing here needs to know about them.
  *
  * Basemap style + its pmtiles/glyphs/sprite are all same-origin (see build-basemap.sh).
  */
@@ -95,57 +100,6 @@ function devicePoints(devices: GeoDevice[]): PointFeatures {
             properties: { id: d.id, name: d.name, status: d.status },
         })),
     };
-}
-
-/**
- * Popup for a clicked site: its name, then every device at it with a red/green status dot.
- * Devices at a site share the site's coordinates, so a list is how you actually "expand" a site
- * into its gear. Clicking a device opens its inspector. Built as DOM (with per-item handlers) so
- * it lives inside MapLibre's popup.
- */
-function openSiteDevices(map: maplibregl.Map, siteName: string, coords: [number, number], devices: GeoDevice[]): void {
-    const devs = [...devices].sort(
-        (a, b) => Number(b.status === 'down') - Number(a.status === 'down') || a.name.localeCompare(b.name),
-    );
-    const down = devs.filter((d) => d.status === 'down').length;
-
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'font:12px/1.4 system-ui,sans-serif;color:#e5e7eb;min-width:200px;';
-    const head = document.createElement('div');
-    head.style.cssText = 'font-weight:600;font-size:13px;color:#fff;margin-bottom:6px;';
-    head.textContent = siteName;
-    const sub = document.createElement('span');
-    sub.style.cssText = 'font-weight:400;color:#9ca3af;';
-    sub.textContent = ` · ${devs.length} device${devs.length === 1 ? '' : 's'}${down ? ` · ${down} down` : ''}`;
-    head.appendChild(sub);
-    wrap.appendChild(head);
-
-    const list = document.createElement('div');
-    list.style.cssText = 'max-height:240px;overflow:auto;display:flex;flex-direction:column;';
-    const popup = new maplibregl.Popup({ maxWidth: '300px', offset: 12 });
-    for (const d of devs) {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;background:none;border:0;color:inherit;cursor:pointer;text-align:left;border-radius:6px;';
-        item.onmouseenter = () => (item.style.background = 'rgba(255,255,255,.06)');
-        item.onmouseleave = () => (item.style.background = 'none');
-        const dot = document.createElement('span');
-        dot.style.cssText = `width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:${STATUS_COLOR[d.status] ?? STATUS_COLOR.unknown};`;
-        const nm = document.createElement('span');
-        nm.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-        nm.textContent = d.name;
-        item.append(dot, nm);
-        item.addEventListener('click', () => { selectDevice(d.id); popup.remove(); });
-        list.appendChild(item);
-    }
-    if (devs.length === 0) {
-        const empty = document.createElement('div');
-        empty.style.cssText = 'color:#9ca3af;padding:2px 6px;';
-        empty.textContent = 'No monitored devices at this site.';
-        list.appendChild(empty);
-    }
-    wrap.appendChild(list);
-    popup.setLngLat(coords).setDOMContent(wrap).addTo(map);
 }
 
 export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weatherUrl: string | null }) {
@@ -299,8 +253,26 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
                 });
                 map.on('mouseleave', 'site-markers', () => { map.getCanvas().style.cursor = ''; hover.remove(); });
 
-                // Click a cluster -> zoom to expand it. Click a site -> pop its devices (name + a
-                // red/green status row each); coincident device coords make a list the real "expand".
+                // Hover a device -> its name (+ its site). Site markers stop being drawn above
+                // DEVICE_ZOOM + 1, so without this the map goes silent on hover exactly when you've
+                // zoomed in far enough to be looking at individual radios.
+                map.on('mouseenter', 'device-points', (e) => {
+                    map.getCanvas().style.cursor = 'pointer';
+                    const f = e.features?.[0];
+                    if (!f) return;
+                    const dev = devicesRef.current.find((d) => d.id === Number(f.properties?.id));
+                    const siteName = dev?.site_id != null ? sitesRef.current.find((s) => s.id === dev.site_id)?.name : undefined;
+                    // setText (not setHTML) - device names are operator-entered and land in the DOM.
+                    const custs = typeof dev?.cust_count === 'number' && dev.cust_count > 0
+                        ? ` \u{1F465} ${dev.cust_count}` : '';
+                    const label = String(f.properties?.name ?? 'Device') + (siteName ? ` · ${siteName}` : '') + custs;
+                    hover.setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number]).setText(label).addTo(map);
+                });
+                map.on('mouseleave', 'device-points', () => { map.getCanvas().style.cursor = ''; hover.remove(); });
+
+                // Click a cluster -> zoom to expand it. Click a site -> open the site inspector
+                // (its devices, notes and Sonar tickets); coincident device coords make that
+                // panel, not the map, the real "expand" of a site.
                 map.on('click', 'site-clusters', (e) => {
                     const f = map.queryRenderedFeatures(e.point, { layers: ['site-clusters'] })[0];
                     const clusterId = f?.properties?.cluster_id;
@@ -314,14 +286,15 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
                     const f = e.features?.[0];
                     if (!f) return;
                     hover.remove();
-                    const siteId = Number(f.properties?.id);
-                    openSiteDevices(map, String(f.properties?.name ?? 'Site'),
-                        (f.geometry as GeoJSON.Point).coordinates as [number, number],
-                        devicesRef.current.filter((d) => d.site_id === siteId));
+                    selectSite(Number(f.properties?.id));
+                    setInspectorOpen(true); // surface the inspector sheet on phones/tablets
                 });
                 map.on('click', 'device-points', (e) => {
                     const id = e.features?.[0]?.properties?.id;
-                    if (typeof id === 'number') selectDevice(id);
+                    if (typeof id === 'number') {
+                        selectDevice(id);
+                        setInspectorOpen(true);
+                    }
                 });
                 for (const layer of ['site-clusters', 'device-points']) {
                     map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
@@ -386,9 +359,38 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
         };
     }, [weatherOn, ready, weatherUrl]);
 
+    /**
+     * Fly to a search hit. A site lands at a zoom where its own marker has split out of any
+     * cluster and opens its inspector, so "find Didier" answers the question in one action
+     * rather than dropping you on a cluster bubble you then have to dig into. A device zooms in
+     * past DEVICE_ZOOM (where individual device dots render) and opens its inspector.
+     */
+    function flyToHit(hit: GeoHit): void {
+        const map = mapRef.current;
+        if (!map) return;
+
+        if (hit.kind === 'site') {
+            const { site } = hit;
+            if (site.latitude == null || site.longitude == null) return;
+            const coords: [number, number] = [Number(site.longitude), Number(site.latitude)];
+            // Stop just SHORT of DEVICE_ZOOM + 1: the site layers are drawn only below that zoom
+            // (maxzoom is an exclusive bound), so landing exactly on it hides the very marker you
+            // just searched for. At DEVICE_ZOOM both the site marker and its devices are visible.
+            map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), DEVICE_ZOOM), speed: 1.6 });
+            selectSite(site.id);
+            setInspectorOpen(true);
+        } else {
+            const { device } = hit;
+            map.flyTo({ center: [device.lng, device.lat], zoom: Math.max(map.getZoom(), DEVICE_ZOOM + 2), speed: 1.6 });
+            selectDevice(device.id);
+            setInspectorOpen(true);
+        }
+    }
+
     return (
         <div className="relative h-full w-full">
             <div ref={containerRef} className="h-full w-full bg-[#0d0d11]" />
+            <GeoSearch sites={sites ?? []} devices={devices ?? []} onPick={flyToHit} />
             {weatherUrl && (
                 <button
                     type="button"

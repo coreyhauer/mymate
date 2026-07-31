@@ -27,6 +27,10 @@ type ShellState = {
     navOpen: boolean;
     inspectorOpen: boolean;
     selectedDeviceId: number | null;
+    // The site whose inspector the geo map is showing. Shares the right rail with the device
+    // inspector - exactly one of the two is ever set (see selectDevice/selectSite). NOT
+    // persisted: a reload lands you back on the map, not inside a panel you left open.
+    selectedSiteId: number | null;
     activeMapId: number | null;
     // Kept as flat primitive records (not a nested object per id) so each getSnapshot
     // returns a stable scalar - a fresh object per render would loop useSyncExternalStore.
@@ -103,6 +107,7 @@ let state: ShellState = {
     navOpen: false,
     inspectorOpen: false,
     selectedDeviceId: saved.selectedDeviceId ?? null,
+    selectedSiteId: null,
     activeMapId: saved.activeMapId ?? null,
     chartModeById: saved.chartModeById ?? {},
     ifaceFilterById: saved.ifaceFilterById ?? {},
@@ -162,11 +167,22 @@ export function setView(view: View): void {
     applyView(view, { push: true });
 }
 
+/**
+ * Select a device for the inspector. Picking one closes any open site panel - they share the
+ * right rail, so leaving both set would stack two inspectors. A deselect (null) leaves the site
+ * selection alone: clicking empty canvas shouldn't reach across and shut a site panel too.
+ */
 export function selectDevice(id: number | null): void {
-    if (state.selectedDeviceId !== id) {
-        state = { ...state, selectedDeviceId: id };
-        emit();
-    }
+    if (state.selectedDeviceId === id && (id === null || state.selectedSiteId === null)) return;
+    state = { ...state, selectedDeviceId: id, selectedSiteId: id === null ? state.selectedSiteId : null };
+    emit();
+}
+
+/** Select a site for the geo inspector. Mirror of {@link selectDevice} - opening one closes the other. */
+export function selectSite(id: number | null): void {
+    if (state.selectedSiteId === id && (id === null || state.selectedDeviceId === null)) return;
+    state = { ...state, selectedSiteId: id, selectedDeviceId: id === null ? state.selectedDeviceId : null };
+    emit();
 }
 
 export function useView(): View {
@@ -175,6 +191,10 @@ export function useView(): View {
 
 export function useSelectedDeviceId(): number | null {
     return useSyncExternalStore(subscribe, () => state.selectedDeviceId);
+}
+
+export function useSelectedSiteId(): number | null {
+    return useSyncExternalStore(subscribe, () => state.selectedSiteId);
 }
 
 // Transient off-canvas UI: the mobile nav drawer + inspector sheet.

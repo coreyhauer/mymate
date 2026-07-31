@@ -61,7 +61,7 @@ class GeoController extends Controller
             ->leftJoin('ap_customer_counts as c', 'c.ap_ip', '=', 'd.mgmt_ip')
             ->where('d.monitored', true)
             ->whereRaw('COALESCE(d.latitude, s.latitude) IS NOT NULL')
-            ->selectRaw('d.id, d.name, d.status, d.site_id,
+            ->selectRaw('d.id, d.name, d.status, d.site_id, d.mgmt_ip,
                 COALESCE(d.latitude, s.latitude) AS lat,
                 COALESCE(d.longitude, s.longitude) AS lng,
                 c.cust_count, c.down_count AS cust_down,
@@ -73,6 +73,7 @@ class GeoController extends Controller
                 'name' => $r->name,
                 'status' => $r->status,
                 'site_id' => $r->site_id !== null ? (int) $r->site_id : null,
+                'mgmt_ip' => $r->mgmt_ip,
                 'lat' => (float) $r->lat,
                 'lng' => (float) $r->lng,
                 'cust_count' => $r->cust_count !== null ? (int) $r->cust_count : null,
