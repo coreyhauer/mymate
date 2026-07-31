@@ -29,6 +29,7 @@ class Device extends Model
         'signal_dbm', 'snr_db', 'ccq_pct', 'wireless_clients', 'ospf_neighbors',
         'os', 'freq_mhz', 'chan_width_mhz', 'freq_backup_mhz', 'chan_width_backup_mhz', 'freq_at',
         'rtt_ms', 'loss_pct', 'ping_at', 'latency_good_ms', 'latency_bad_ms',
+        'acknowledged', 'ack_at', 'ack_note',
         'backup_enabled', 'backup_driver', 'backup_status', 'backup_message', 'backup_at', 'backup_commit',
     ];
 
@@ -36,6 +37,8 @@ class Device extends Model
         'poll_method' => PollMethod::class,
         'status' => DeviceStatus::class,
         'monitored' => 'boolean',
+        'acknowledged' => 'boolean',
+        'ack_at' => 'datetime',
         'device_type' => DeviceType::class,
         'upgrade_status' => UpgradeStatus::class,
         'last_change' => 'datetime',
@@ -73,6 +76,7 @@ class Device extends Model
     protected $attributes = [
         'status' => 'unknown',
         'monitored' => true,
+        'acknowledged' => false,
         'device_type' => 'unknown',
         'map_x' => 0,
         'map_y' => 0,

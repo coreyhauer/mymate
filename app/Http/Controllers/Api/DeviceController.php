@@ -18,6 +18,7 @@ use App\Jobs\BulkUpgradeJob;
 use App\Jobs\UpgradeDeviceJob;
 use App\Models\Device;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 
@@ -59,6 +60,30 @@ class DeviceController extends Controller
         $deleteDevice($device);
 
         return response()->noContent();
+    }
+
+    /**
+     * Acknowledge a device - a known/intentional down (suspended customer, polling-disabled
+     * gear, cancelled ONU) that shouldn't clutter the actionable outage list. Acked devices
+     * are hidden from the default Outages view. Optional `note` records why.
+     */
+    public function acknowledge(Request $request, Device $device): DeviceResource
+    {
+        $device->update([
+            'acknowledged' => true,
+            'ack_at' => now(),
+            'ack_note' => $request->string('note')->trim()->value() ?: null,
+        ]);
+
+        return new DeviceResource($device->loadMissing('parent'));
+    }
+
+    /** Clear a device's acknowledgement - it re-appears in the default Outages view. */
+    public function unacknowledge(Device $device): DeviceResource
+    {
+        $device->update(['acknowledged' => false, 'ack_at' => null, 'ack_note' => null]);
+
+        return new DeviceResource($device->loadMissing('parent'));
     }
 
     /**

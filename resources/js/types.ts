@@ -438,6 +438,8 @@ export interface Outage {
     duration_s: number | null;
     ongoing: boolean;
     cause: string | null;
+    acknowledged: boolean;
+    ack_note: string | null;
 }
 
 // Live throughput event (App\Events\InterfaceUtilUpdated) - coalesced across devices.

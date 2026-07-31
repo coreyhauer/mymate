@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\DeviceType;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -18,6 +19,9 @@ class OutageResource extends JsonResource
             'duration_s' => $this->duration_s,
             'ongoing' => $this->ended_at === null,
             'cause' => $this->cause,
+            'acknowledged' => (bool) ($this->device?->acknowledged ?? false),
+            'ack_note' => $this->device?->ack_note,
+            'is_cpe' => $this->device?->device_type === DeviceType::Ont,
         ];
     }
 }

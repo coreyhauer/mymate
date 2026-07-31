@@ -98,6 +98,9 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
         ->middleware('throttle:10,1')->name('devices.upgrade.preflight');
     Route::post('devices/upgrade', [DeviceController::class, 'upgrade'])
         ->middleware('throttle:10,1')->name('devices.upgrade');
+    // Acknowledge / clear a known-down device so it drops out of the actionable outage list.
+    Route::post('devices/{device}/ack', [DeviceController::class, 'acknowledge'])->name('devices.ack');
+    Route::delete('devices/{device}/ack', [DeviceController::class, 'unacknowledge'])->name('devices.unack');
     Route::apiResource('devices', DeviceController::class);
 
     // A device's interfaces (link binder picks each end from these).

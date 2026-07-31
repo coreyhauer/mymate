@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Warning } from '@phosphor-icons/react';
-import { useOutages } from '../api/getOutages';
+import { BellSlash, Warning } from '@phosphor-icons/react';
+import { useAckDevice, useOutages } from '../api/getOutages';
 import { StatusDot } from '../../../components/StatusDot';
 import { relativeTime } from '../../../lib/relativeTime';
 import { selectDevice, setView } from '../../../lib/shellStore';
@@ -23,11 +23,18 @@ const pill = (active: boolean) =>
 
 export function OutagesView() {
     const [filter, setFilter] = useState<Filter>('all');
-    const { data: outages, isLoading } = useOutages(filter === 'all' ? undefined : filter);
+    const [showAcked, setShowAcked] = useState(false);
+    const [showCpe, setShowCpe] = useState(false);
+    const { data: outages, isLoading } = useOutages(filter === 'all' ? undefined : filter, showAcked, showCpe);
+    const ack = useAckDevice();
 
     function open(deviceId: number) {
         selectDevice(deviceId);
         setView('map');
+    }
+
+    function toggleAck(deviceId: number, acked: boolean) {
+        ack.mutate({ deviceId, acked });
     }
 
     return (
@@ -43,12 +50,28 @@ export function OutagesView() {
                             <p className="text-xs text-white/40">Device down-events with durations, newest first</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-0.5 rounded-full bg-white/5 p-0.5 ring-1 ring-white/10">
-                        {(['all', 'open', 'closed'] as Filter[]).map((f) => (
-                            <button key={f} onClick={() => setFilter(f)} className={pill(filter === f)}>
-                                {f === 'all' ? 'All' : f === 'open' ? 'Ongoing' : 'Resolved'}
-                            </button>
-                        ))}
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setShowCpe((v) => !v)}
+                            className={pill(showCpe)}
+                            title="Customer fiber ONUs / monitored customer routers are hidden by default so the list stays infrastructure-only"
+                        >
+                            {showCpe ? 'Showing ONUs' : 'Show ONUs'}
+                        </button>
+                        <button
+                            onClick={() => setShowAcked((v) => !v)}
+                            className={pill(showAcked)}
+                            title="Acknowledged devices (suspended/cancelled/polling-disabled) are hidden by default"
+                        >
+                            {showAcked ? 'Showing acked' : 'Show acked'}
+                        </button>
+                        <div className="flex items-center gap-0.5 rounded-full bg-white/5 p-0.5 ring-1 ring-white/10">
+                            {(['all', 'open', 'closed'] as Filter[]).map((f) => (
+                                <button key={f} onClick={() => setFilter(f)} className={pill(filter === f)}>
+                                    {f === 'all' ? 'All' : f === 'open' ? 'Ongoing' : 'Resolved'}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </header>
 
@@ -60,13 +83,14 @@ export function OutagesView() {
                     </div>
                 ) : (
                     <div className="overflow-x-auto rounded-2xl ring-1 ring-white/[0.06]">
-                        <table className="w-full min-w-[34rem] text-left text-sm">
+                        <table className="w-full min-w-[38rem] text-left text-sm">
                             <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wide text-white/40">
                                 <tr>
                                     <th className="px-4 py-2.5 font-medium">Device</th>
                                     <th className="px-4 py-2.5 font-medium">Started</th>
                                     <th className="px-4 py-2.5 font-medium">Duration</th>
                                     <th className="px-4 py-2.5 font-medium">State</th>
+                                    <th className="px-4 py-2.5 text-right font-medium">Ack</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/[0.04]">
@@ -74,9 +98,25 @@ export function OutagesView() {
                                     <tr
                                         key={o.id}
                                         onClick={() => open(o.device_id)}
-                                        className="cursor-pointer transition-colors duration-200 hover:bg-white/[0.03]"
+                                        className={`cursor-pointer transition-colors duration-200 hover:bg-white/[0.03] ${
+                                            o.acknowledged ? 'opacity-45' : ''
+                                        }`}
                                     >
-                                        <td className="px-4 py-2.5 font-medium text-white/85">{o.device_name ?? `device ${o.device_id}`}</td>
+                                        <td className="px-4 py-2.5 font-medium text-white/85">
+                                            <span className="flex items-center gap-2">
+                                                {o.device_name ?? `device ${o.device_id}`}
+                                                {o.is_cpe && (
+                                                    <span className="rounded-full bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-cyan-300/70">
+                                                        onu
+                                                    </span>
+                                                )}
+                                                {o.acknowledged && (
+                                                    <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/50">
+                                                        acked
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </td>
                                         <td className="px-4 py-2.5 tabular-nums text-white/55">{relativeTime(o.started_at)}</td>
                                         <td className="px-4 py-2.5 tabular-nums text-white/70">
                                             {o.ongoing ? 'ongoing' : fmtDuration(o.duration_s)}
@@ -86,6 +126,20 @@ export function OutagesView() {
                                                 <StatusDot status={o.ongoing ? 'down' : 'up'} />
                                                 {o.ongoing ? 'Down' : 'Recovered'}
                                             </span>
+                                        </td>
+                                        <td className="px-4 py-2.5 text-right">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    toggleAck(o.device_id, !o.acknowledged);
+                                                }}
+                                                disabled={ack.isPending}
+                                                title={o.acknowledged ? 'Clear acknowledgement' : 'Acknowledge - hide from actionable outages'}
+                                                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white/55 ring-1 ring-white/10 transition-colors duration-200 hover:bg-white/5 hover:text-white/85 disabled:opacity-40"
+                                            >
+                                                <BellSlash weight="light" className="h-3.5 w-3.5" />
+                                                {o.acknowledged ? 'Unack' : 'Ack'}
+                                            </button>
                                         </td>
                                     </tr>
                                 ))}
