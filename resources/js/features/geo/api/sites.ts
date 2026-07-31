@@ -27,6 +27,16 @@ export interface GeoDevice {
     site_id: number | null;
     lat: number;
     lng: number;
+    /** Start of the still-open outage (ISO) - null when the device isn't currently down. */
+    down_since: string | null;
+    /**
+     * Sonar customers whose CPE last attached through this AP. null = the AP was never polled
+     * (unknown), so a down AP with no data must NOT be treated as "0 customers / non-urgent".
+     * 0 = polled, no billed customers. Only APs carry this; non-AP devices are always null.
+     */
+    cust_count: number | null;
+    /** Of cust_count, how many are currently down (their CPE not seen in the last poll). */
+    cust_down: number | null;
 }
 
 /**

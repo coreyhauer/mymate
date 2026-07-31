@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -36,19 +37,36 @@ class GeoController extends Controller
 
     /**
      * Compact placed-device feed for the geo map. Just what the map draws - id, name, status,
-     * site, and effective coordinates (own pin, else the site's, resolved in SQL) - so the map
-     * doesn't have to pull the full multi-megabyte device resource just to plot dots and colour
-     * sites. Monitored devices only (a paused/acked device isn't on the live map).
+     * site, effective coordinates (own pin, else the site's, resolved in SQL), and how long a
+     * down device has been down - so the map doesn't have to pull the full multi-megabyte device
+     * resource just to plot dots and colour sites. Monitored devices only (a paused/acked device
+     * isn't on the live map).
+     *
+     * `down_since` is the still-open outage's `started_at` (the precise "went down" moment; a
+     * device's `last_change` is overwritten on recovery too, so it can't answer this). Read as a
+     * scalar subquery rather than a join: a device should only ever have one open outage, but a
+     * racing poller could briefly leave two, and a join would then emit the device twice and
+     * double-count it in the site's device/down tallies. MIN() also picks the earliest start,
+     * which is the honest answer for how long the thing has actually been dark. Backed by the
+     * partial index on open outages, so this stays cheap against a million-row history.
      */
     public function devices(): JsonResponse
     {
+        // ap_customer_counts is keyed by ap_ip and joins 1:1 to devices.mgmt_ip (both unique), so
+        // a leftJoin here can't multiply device rows the way an outage join would. cust_count is
+        // null when the AP was never polled (no row) - the map shows that as unknown, NOT zero,
+        // so a down AP with no data doesn't read as "safe to ignore".
         $rows = DB::table('devices as d')
             ->leftJoin('sites as s', 's.id', '=', 'd.site_id')
+            ->leftJoin('ap_customer_counts as c', 'c.ap_ip', '=', 'd.mgmt_ip')
             ->where('d.monitored', true)
             ->whereRaw('COALESCE(d.latitude, s.latitude) IS NOT NULL')
             ->selectRaw('d.id, d.name, d.status, d.site_id,
                 COALESCE(d.latitude, s.latitude) AS lat,
-                COALESCE(d.longitude, s.longitude) AS lng')
+                COALESCE(d.longitude, s.longitude) AS lng,
+                c.cust_count, c.down_count AS cust_down,
+                (SELECT MIN(o.started_at) FROM outages o
+                    WHERE o.device_id = d.id AND o.ended_at IS NULL) AS down_since')
             ->get()
             ->map(fn ($r) => [
                 'id' => (int) $r->id,
@@ -57,6 +75,11 @@ class GeoController extends Controller
                 'site_id' => $r->site_id !== null ? (int) $r->site_id : null,
                 'lat' => (float) $r->lat,
                 'lng' => (float) $r->lng,
+                'cust_count' => $r->cust_count !== null ? (int) $r->cust_count : null,
+                'cust_down' => $r->cust_down !== null ? (int) $r->cust_down : null,
+                'down_since' => $r->down_since !== null
+                    ? Carbon::parse($r->down_since)->toIso8601String()
+                    : null,
             ]);
 
         return response()->json(['data' => $rows]);
