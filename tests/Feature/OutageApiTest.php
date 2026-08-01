@@ -64,4 +64,55 @@ class OutageApiTest extends TestCase
 
         $this->getJson('/api/outages')->assertUnauthorized();
     }
+
+    public function test_default_call_is_unchanged_by_the_new_params(): void
+    {
+        $this->actingAsUser();
+        Outage::factory()->count(3)->create();
+
+        $response = $this->getJson('/api/outages')->assertOk()->assertJsonCount(3, 'data');
+
+        // No pagination envelope - still the bare `data` array the SPA already expects.
+        $this->assertArrayNotHasKey('links', $response->json());
+        $this->assertArrayNotHasKey('meta', $response->json());
+    }
+
+    public function test_filters_by_from_and_to(): void
+    {
+        $this->actingAsUser();
+        $device = Device::factory()->create();
+
+        $this->travelTo(now()->startOfDay());
+        $inRange = Outage::factory()->for($device)->create(['started_at' => now()->subDays(2)]);
+        Outage::factory()->for($device)->create(['started_at' => now()->subDays(10)]); // too old
+        Outage::factory()->for($device)->create(['started_at' => now()]); // too new
+
+        $this->getJson('/api/outages?from='.now()->subDays(3)->toIso8601String().'&to='.now()->subDay()->toIso8601String())
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $inRange->id);
+        $this->travelBack();
+    }
+
+    public function test_invalid_from_is_rejected(): void
+    {
+        $this->actingAsUser();
+
+        $this->getJson('/api/outages?from=not-a-date')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['from']);
+    }
+
+    public function test_per_page_returns_a_cursor_paginated_envelope(): void
+    {
+        $this->actingAsUser();
+        Outage::factory()->count(5)->create();
+
+        $response = $this->getJson('/api/outages?per_page=2')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $this->assertNotNull($response->json('meta.next_cursor'));
+        $this->assertNotNull($response->json('meta.path'));
+    }
 }
