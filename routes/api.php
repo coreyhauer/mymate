@@ -225,8 +225,13 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
     Route::patch('maps/{map}/shares/{share}', [MapShareController::class, 'update'])->name('maps.shares.update');
     Route::delete('maps/{map}/shares/{share}', [MapShareController::class, 'destroy'])->name('maps.shares.destroy');
 
-    // Outage timeline - ?device_id= , ?state=open|closed.
+    // Outage timeline - ?device_id= , ?state=open|closed, ?from= / ?to=, ?per_page= (cursor).
     Route::get('outages', [OutageController::class, 'index'])->name('outages.index');
+
+    // Raw site_links registry (ids + endpoint provenance behind geo/backhauls' coordinate-only feed).
+    Route::get('site-links', [\App\Http\Controllers\Api\SiteLinkController::class, 'index'])->name('site-links.index');
+    // Materialised per-device RF/link-health state (LibreNMS-sourced, ~5-min cadence). ?since= for deltas.
+    Route::get('rf-link-state', [\App\Http\Controllers\Api\RfLinkStateController::class, 'index'])->name('rf-link-state.index');
 
     // MikroTik "The Dude" import (FR-Dude): upload a dude.db, then poll the run for
     // live stage/percent/ETA; cancel stops it cleanly.
