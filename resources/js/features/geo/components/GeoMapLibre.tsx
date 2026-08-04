@@ -9,8 +9,9 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
 import { useBackhauls, useGeoDevices, useGeoTickets, useSites, type Backhaul, type GeoDevice, type GeoTicketSite, type Site } from '../api/sites';
 import { useMapChannel } from '../../topology/hooks/useMapChannel';
-import { selectDevice, selectSite, setInspectorOpen } from '../../../lib/shellStore';
+import { selectDevice, setInspectorOpen } from '../../../lib/shellStore';
 import { GeoSearch, type GeoHit } from './GeoSearch';
+import { SitePopup } from './SitePopup';
 
 /**
  * MapLibre GL geographic view (LTD high-scale renderer).
@@ -22,9 +23,10 @@ import { GeoSearch, type GeoHit } from './GeoSearch';
  * appear. Device data comes from a compact geo feed (/geo/devices), not the full device resource,
  * so opening the map doesn't pull megabytes.
  *
- * Clicking a site selects it, which opens the SITE INSPECTOR in the shell's right rail (it used
- * to build a raw-DOM MapLibre popup of the site's devices). The panel carries the same device
- * list plus the site's notes and linked Sonar tickets, so nothing here needs to know about them.
+ * Clicking a site opens SitePopup ANCHORED OVER THE TOWER - the device list (plus notes and
+ * Sonar tickets) belongs on the map next to the marker the operator just clicked, not in a rail
+ * on the far side of the screen (operator preference, restored 2026-08-04 after a deploy
+ * regressed it to the right-rail SiteInspector). The rail remains the DEVICE card only.
  *
  * Basemap style + its pmtiles/glyphs/sprite are all same-origin (see build-basemap.sh).
  */
@@ -229,6 +231,17 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
     const { data: ticketSites } = useGeoTickets(ticketsOn); // fetched only while the layer is on
     const ticketSitesRef = useRef<GeoTicketSite[]>([]);
 
+    // The clicked site's popup, keyed by site so switching towers is a clean remount. Held as a
+    // ref-wrapped opener (same pattern as rebuild) so map handlers registered once at init can
+    // always reach the current sites list.
+    const [popupSite, setPopupSite] = useState<{ site: Site; coords: [number, number] } | null>(null);
+    const openSitePopup = useRef((siteId: number) => {
+        const s = sitesRef.current.find((x) => x.id === siteId);
+        if (s && s.latitude != null && s.longitude != null) {
+            setPopupSite({ site: s, coords: [Number(s.longitude), Number(s.latitude)] });
+        }
+    });
+
     const rebuild = useRef(() => {
         const map = mapRef.current;
         if (!map || !readyRef.current) return;
@@ -397,8 +410,14 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
                     const f = e.features?.[0];
                     if (!f) return;
                     hover.remove();
-                    selectSite(Number(f.properties?.id));
-                    setInspectorOpen(true); // surface the inspector sheet on phones/tablets
+                    openSitePopup.current(Number(f.properties?.id));
+                });
+                // Click-away closes the site popup - but only when the click landed on none of
+                // our interactive layers, so the click that OPENS a popup (or picks a device or
+                // ticket) never immediately closes it.
+                map.on('click', (e) => {
+                    const layers = ['site-markers', 'device-points', 'ticket-icons'].filter((l) => !!map.getLayer(l));
+                    if (map.queryRenderedFeatures(e.point, { layers }).length === 0) setPopupSite(null);
                 });
                 map.on('click', 'device-points', (e) => {
                     const id = e.features?.[0]?.properties?.id;
@@ -515,10 +534,9 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
             if (site.tickets.length === 1) {
                 window.open(site.tickets[0].url, '_blank', 'noopener');
             } else {
-                // Several tickets: the site inspector's Sonar section lists them all.
+                // Several tickets: the site popup's Sonar section lists them all, on the map.
                 hover.remove();
-                selectSite(site.site_id);
-                setInspectorOpen(true);
+                openSitePopup.current(site.site_id);
             }
         };
         map.on('mouseenter', 'ticket-icons', enter);
@@ -563,8 +581,7 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
             // (maxzoom is an exclusive bound), so landing exactly on it hides the very marker you
             // just searched for. At DEVICE_ZOOM both the site marker and its devices are visible.
             map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), DEVICE_ZOOM), speed: 1.6 });
-            selectSite(site.id);
-            setInspectorOpen(true);
+            openSitePopup.current(site.id);
         } else {
             const { device } = hit;
             map.flyTo({ center: [device.lng, device.lat], zoom: Math.max(map.getZoom(), DEVICE_ZOOM + 2), speed: 1.6 });
@@ -576,6 +593,15 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
     return (
         <div className="relative h-full w-full">
             <div ref={containerRef} className="h-full w-full bg-[#0d0d11]" />
+            {popupSite && mapRef.current && ready && (
+                <SitePopup
+                    key={popupSite.site.id}
+                    map={mapRef.current}
+                    site={popupSite.site}
+                    coords={popupSite.coords}
+                    onClose={() => setPopupSite(null)}
+                />
+            )}
             <GeoSearch sites={sites ?? []} devices={devices ?? []} onPick={flyToHit} />
             <div className="absolute right-3 top-3 z-10 flex gap-2">
                 {ticketsOn && (
