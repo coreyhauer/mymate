@@ -384,6 +384,12 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
                     map.getCanvas().style.cursor = 'pointer';
                     const f = e.features?.[0];
                     if (!f) return;
+                    // In the zoom band where site markers and device dots BOTH render, devices sit
+                    // at the site's exact coordinates - without this guard the device tooltip fires
+                    // after the site's and overwrites it, so hovering a tower shows "some radio ·
+                    // site" instead of the site. The site marker wins; devices get their own hover
+                    // once the markers fade out past DEVICE_ZOOM + 1.
+                    if (map.queryRenderedFeatures(e.point, { layers: ['site-markers'] }).length > 0) return;
                     const dev = devicesRef.current.find((d) => d.id === Number(f.properties?.id));
                     const siteName = dev?.site_id != null ? sitesRef.current.find((s) => s.id === dev.site_id)?.name : undefined;
                     // setText (not setHTML) - device names are operator-entered and land in the DOM.
@@ -420,6 +426,9 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
                     if (map.queryRenderedFeatures(e.point, { layers }).length === 0) setPopupSite(null);
                 });
                 map.on('click', 'device-points', (e) => {
+                    // Same stacking rule as hover: when the click also hit a site marker, the site
+                    // popup is the intent - don't ALSO open the device inspector underneath it.
+                    if (map.queryRenderedFeatures(e.point, { layers: ['site-markers'] }).length > 0) return;
                     const id = e.features?.[0]?.properties?.id;
                     if (typeof id === 'number') {
                         selectDevice(id);
