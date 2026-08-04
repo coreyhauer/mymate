@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl/dist/maplibre-gl-csp';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
-import { useBackhauls, useGeoDevices, useSites, type Backhaul, type GeoDevice, type Site } from '../api/sites';
+import { useBackhauls, useGeoDevices, useGeoTickets, useSites, type Backhaul, type GeoDevice, type GeoTicketSite, type Site } from '../api/sites';
 import { useMapChannel } from '../../topology/hooks/useMapChannel';
 import { selectDevice, selectSite, setInspectorOpen } from '../../../lib/shellStore';
 import { GeoSearch, type GeoHit } from './GeoSearch';
@@ -42,6 +42,93 @@ function ensurePmtilesProtocol(): void {
 
 const STATUS_COLOR = { up: '#34d399', down: '#f43f5e', unknown: '#52525b' } as const;
 const DEVICE_ZOOM = 11; // at/above this, individual devices show and site markers fade out
+const TICKET_PURPLE = '#a855f7'; // the ticket layer's one loud colour - nothing else on the map is purple
+
+/**
+ * The ticket-layer icon, drawn on a canvas (2x for retina) rather than shipped as a sprite:
+ * the basemap's glyph fonts have no emoji, and a runtime-drawn image needs no asset pipeline.
+ * A classic perforated ticket stub in bright purple with a white border - unmistakable against
+ * the green/red health markers.
+ */
+function ticketIconImage(): ImageData {
+    const w = 52, h = 36; // 2x, rendered at 26x18 via pixelRatio
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+    const r = 7;
+
+    // Manual rounded-rect path (roundRect() is missing from older Safari + this tsconfig's lib).
+    const x0 = 3, y0 = 3, x1 = w - 3, y1 = h - 3;
+    ctx.beginPath();
+    ctx.moveTo(x0 + r, y0);
+    ctx.lineTo(x1 - r, y0);
+    ctx.arcTo(x1, y0, x1, y0 + r, r);
+    ctx.lineTo(x1, y1 - r);
+    ctx.arcTo(x1, y1, x1 - r, y1, r);
+    ctx.lineTo(x0 + r, y1);
+    ctx.arcTo(x0, y1, x0, y1 - r, r);
+    ctx.lineTo(x0, y0 + r);
+    ctx.arcTo(x0, y0, x0 + r, y0, r);
+    ctx.closePath();
+    ctx.fillStyle = TICKET_PURPLE;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+
+    // Side notches, punched out so the map shows through - what makes it read as a ticket.
+    ctx.globalCompositeOperation = 'destination-out';
+    for (const x of [3, w - 3]) {
+        ctx.beginPath();
+        ctx.arc(x, h / 2, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Perforation line down the stub.
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3.5, 3.5]);
+    ctx.beginPath();
+    ctx.moveTo(w * 0.66, 7);
+    ctx.lineTo(w * 0.66, h - 7);
+    ctx.stroke();
+
+    return ctx.getImageData(0, 0, w, h);
+}
+
+const escapeHtml = (s: string): string =>
+    s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** Hover card for a site's open tickets - all content escaped (Sonar subjects land in the DOM). */
+function ticketHoverHtml(site: GeoTicketSite): string {
+    const rows = site.tickets.slice(0, 5).map((t) => {
+        const meta = [t.status, t.priority, t.account_name ?? t.via_device].filter((v): v is string => !!v).join(' · ');
+        return `<div style="margin-top:4px">
+            <span style="color:#d8b4fe;font-weight:600">#${t.ticket_id}</span>
+            ${meta ? `<span style="color:rgba(255,255,255,.55)"> ${escapeHtml(meta)}</span>` : ''}
+            <div style="color:rgba(255,255,255,.85)">${escapeHtml(t.subject ?? '(no subject)')}</div>
+        </div>`;
+    });
+    const more = site.tickets.length > 5 ? `<div style="color:rgba(255,255,255,.5);margin-top:4px">+${site.tickets.length - 5} more…</div>` : '';
+    return `<div style="max-width:280px;font-size:12px;line-height:1.35">
+        <div style="font-weight:600">${escapeHtml(site.name)}</div>${rows.join('')}${more}
+        <div style="color:rgba(255,255,255,.45);margin-top:5px">${site.tickets.length === 1 ? 'click to open in Sonar' : 'click for details'}</div>
+    </div>`;
+}
+
+/** Ticket-layer markers: one per site that has at least one open Sonar ticket. */
+function ticketPoints(sites: GeoTicketSite[]): PointFeatures {
+    return {
+        type: 'FeatureCollection',
+        features: sites.map((s) => ({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [s.lng, s.lat] },
+            properties: { site_id: s.site_id, count: s.tickets.length },
+        })),
+    };
+}
 
 type PointFeatures = GeoJSON.FeatureCollection<GeoJSON.Point>;
 
@@ -117,6 +204,9 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
     const backhaulsRef = useRef<Backhaul[]>([]);
     const [ready, setReady] = useState(false); // map style + our layers are in place
     const [weatherOn, setWeatherOn] = useState(false);
+    const [ticketsOn, setTicketsOn] = useState(false);
+    const { data: ticketSites } = useGeoTickets(ticketsOn); // fetched only while the layer is on
+    const ticketSitesRef = useRef<GeoTicketSite[]>([]);
 
     const rebuild = useRef(() => {
         const map = mapRef.current;
@@ -359,6 +449,79 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
         };
     }, [weatherOn, ready, weatherUrl]);
 
+    // Sonar-ticket layer: bright-purple ticket stubs on every site with an open ticket, at all
+    // zooms (the point is spotting them from the wide view). Hover shows the tickets; click
+    // opens the ticket in Sonar (or the site inspector when there are several). Added/removed
+    // whole with the toggle, weather-style, so the default map carries no extra layers.
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!map || !ready || !ticketsOn) return;
+
+        if (!map.hasImage('ticket-stub')) map.addImage('ticket-stub', ticketIconImage(), { pixelRatio: 2 });
+        map.addSource('tickets', { type: 'geojson', data: ticketPoints(ticketSitesRef.current) });
+        map.addLayer({
+            id: 'ticket-icons', type: 'symbol', source: 'tickets',
+            layout: {
+                'icon-image': 'ticket-stub',
+                'icon-allow-overlap': true,
+                'icon-anchor': 'bottom',
+                'icon-offset': [10, -8], // float above-right so the health marker stays readable
+                // A count on the stub when a site carries more than one open ticket.
+                'text-field': ['case', ['>', ['get', 'count'], 1], ['to-string', ['get', 'count']], ''],
+                'text-font': ['Noto Sans Regular'],
+                'text-size': 11,
+                'text-offset': [0.55, -1.55],
+                'text-allow-overlap': true,
+            },
+            paint: { 'text-color': '#ffffff' },
+        });
+
+        const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 14, maxWidth: '300px' });
+        const enter = (e: maplibregl.MapLayerMouseEvent) => {
+            map.getCanvas().style.cursor = 'pointer';
+            const f = e.features?.[0];
+            const site = ticketSitesRef.current.find((s) => s.site_id === Number(f?.properties?.site_id));
+            if (f && site) {
+                hover.setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
+                    .setHTML(ticketHoverHtml(site)) // content is escaped in ticketHoverHtml
+                    .addTo(map);
+            }
+        };
+        const leave = () => { map.getCanvas().style.cursor = ''; hover.remove(); };
+        const click = (e: maplibregl.MapLayerMouseEvent) => {
+            const site = ticketSitesRef.current.find((s) => s.site_id === Number(e.features?.[0]?.properties?.site_id));
+            if (!site) return;
+            if (site.tickets.length === 1) {
+                window.open(site.tickets[0].url, '_blank', 'noopener');
+            } else {
+                // Several tickets: the site inspector's Sonar section lists them all.
+                hover.remove();
+                selectSite(site.site_id);
+                setInspectorOpen(true);
+            }
+        };
+        map.on('mouseenter', 'ticket-icons', enter);
+        map.on('mouseleave', 'ticket-icons', leave);
+        map.on('click', 'ticket-icons', click);
+
+        return () => {
+            map.off('mouseenter', 'ticket-icons', enter);
+            map.off('mouseleave', 'ticket-icons', leave);
+            map.off('click', 'ticket-icons', click);
+            hover.remove();
+            if (map.getLayer('ticket-icons')) map.removeLayer('ticket-icons');
+            if (map.getSource('tickets')) map.removeSource('tickets');
+        };
+    }, [ticketsOn, ready]);
+
+    // Keep the ticket source current as the query refetches (the layer effect above only runs
+    // on toggle; data updates flow in here, the same split rebuild() uses for the other sources).
+    useEffect(() => {
+        ticketSitesRef.current = ticketSites ?? [];
+        const map = mapRef.current;
+        (map?.getSource('tickets') as maplibregl.GeoJSONSource | undefined)?.setData(ticketPoints(ticketSitesRef.current));
+    }, [ticketSites]);
+
     /**
      * Fly to a search hit. A site lands at a zoom where its own marker has split out of any
      * cluster and opens its inspector, so "find Didier" answers the question in one action
@@ -391,20 +554,34 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
         <div className="relative h-full w-full">
             <div ref={containerRef} className="h-full w-full bg-[#0d0d11]" />
             <GeoSearch sites={sites ?? []} devices={devices ?? []} onPick={flyToHit} />
-            {weatherUrl && (
+            <div className="absolute right-3 top-3 z-10 flex gap-2">
                 <button
                     type="button"
-                    onClick={() => setWeatherOn((v) => !v)}
-                    title="Toggle weather radar"
-                    className={`absolute right-3 top-3 z-10 rounded-lg px-3 py-1.5 text-xs font-medium ring-1 backdrop-blur transition-colors ${
-                        weatherOn
-                            ? 'bg-sky-500/20 text-sky-200 ring-sky-400/40'
+                    onClick={() => setTicketsOn((v) => !v)}
+                    title="Show sites with open Sonar tickets"
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium ring-1 backdrop-blur transition-colors ${
+                        ticketsOn
+                            ? 'bg-purple-500/25 text-purple-200 ring-purple-400/50'
                             : 'bg-black/50 text-white/70 ring-white/15 hover:bg-black/70'
                     }`}
                 >
-                    Weather
+                    Tickets
                 </button>
-            )}
+                {weatherUrl && (
+                    <button
+                        type="button"
+                        onClick={() => setWeatherOn((v) => !v)}
+                        title="Toggle weather radar"
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium ring-1 backdrop-blur transition-colors ${
+                            weatherOn
+                                ? 'bg-sky-500/20 text-sky-200 ring-sky-400/40'
+                                : 'bg-black/50 text-white/70 ring-white/15 hover:bg-black/70'
+                        }`}
+                    >
+                        Weather
+                    </button>
+                )}
+            </div>
         </div>
     );
 }

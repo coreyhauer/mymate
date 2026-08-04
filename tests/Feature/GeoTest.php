@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Device;
+use App\Models\Site;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -79,6 +80,52 @@ class GeoTest extends TestCase
             ->assertJsonPath('data.geo_source', 'manual');
 
         $this->assertDatabaseHas('devices', ['id' => $device->id, 'geo_source' => 'manual']);
+    }
+
+    public function test_geo_tickets_rolls_open_tickets_up_to_their_placed_site(): void
+    {
+        config(['mymate.sonar.ticket_url_template' => 'https://sonar.example/app#/tickets/show/{id}']);
+
+        $site = Site::factory()->at(43.59206, -94.83101)->create(['name' => 'Gavin Tlam']);
+        $device = Device::factory()->create(['site_id' => $site->id, 'name' => 'tlam5n']);
+
+        // Site-linked and device-linked open tickets both roll up to the same site row.
+        $site->sonarTicketLinks()->create(['ticket_id' => 111, 'subject' => 'Tower power flapping', 'status' => 'OPEN']);
+        $device->sonarTicketLinks()->create(['ticket_id' => 222, 'subject' => 'Sector down', 'status' => 'PENDING_INTERNAL']);
+        // CLOSED is not an open ticket - never drawn.
+        $device->sonarTicketLinks()->create(['ticket_id' => 333, 'subject' => 'Old resolved thing', 'status' => 'CLOSED']);
+
+        // A ticket on a device at an UNPLACED site can't be drawn - excluded, not a null island.
+        $bare = Site::factory()->create(['latitude' => null, 'longitude' => null]);
+        Device::factory()->create(['site_id' => $bare->id])
+            ->sonarTicketLinks()->create(['ticket_id' => 444, 'subject' => 'Invisible', 'status' => 'OPEN']);
+
+        $data = $this->getJson('/api/geo/tickets')->assertOk()->json('data');
+
+        $this->assertCount(1, $data);
+        $this->assertSame($site->id, $data[0]['site_id']);
+        $this->assertSame('Gavin Tlam', $data[0]['name']);
+        $this->assertEqualsWithDelta(43.59206, $data[0]['lat'], 0.0001);
+        $ids = array_column($data[0]['tickets'], 'ticket_id');
+        sort($ids);
+        $this->assertSame([111, 222], $ids);
+
+        $byId = array_column($data[0]['tickets'], null, 'ticket_id');
+        $this->assertSame('https://sonar.example/app#/tickets/show/111', $byId[111]['url']);
+        $this->assertNull($byId[111]['via_device']); // site-linked: no device attribution
+        $this->assertSame('tlam5n', $byId[222]['via_device']); // device-linked: names the radio
+    }
+
+    public function test_geo_tickets_treats_never_refreshed_links_as_open(): void
+    {
+        // A just-linked ticket has status NULL until the first Sonar refresh lands - the map
+        // must show it (it is overwhelmingly an open ticket; that's why someone linked it).
+        $site = Site::factory()->at(41.0, -97.0)->create();
+        $site->sonarTicketLinks()->create(['ticket_id' => 555]);
+
+        $this->getJson('/api/geo/tickets')->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.tickets.0.ticket_id', 555);
     }
 
     public function test_csp_allows_the_configured_tile_host(): void

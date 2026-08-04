@@ -108,6 +108,63 @@ class GeoController extends Controller
         return response()->json(['data' => $rows]);
     }
 
+    /**
+     * Open Sonar tickets rolled up to their tower, for the geo map's ticket layer. A ticket
+     * linked to a device belongs to that device's site; one linked to a site belongs to the
+     * site itself. One row per placed site, carrying every non-CLOSED ticket it hosts, each
+     * with its Sonar deep-link (same template as SonarTicketLinkResource). Link-attached
+     * tickets are deliberately absent: the map's unit is the site marker.
+     */
+    public function tickets(): JsonResponse
+    {
+        $template = (string) config('mymate.sonar.ticket_url_template');
+        $open = static function ($query): void {
+            $query->where(function ($w): void {
+                $w->whereNull('t.status')->orWhere('t.status', '!=', 'CLOSED');
+            });
+        };
+
+        $siteLinked = DB::table('sonar_ticket_links as t')
+            ->join('sites as s', 's.id', '=', 't.notable_id')
+            ->where('t.notable_type', \App\Models\Site::class)
+            ->whereNotNull('s.latitude')->whereNotNull('s.longitude')
+            ->where($open)
+            ->selectRaw("s.id AS site_id, s.name AS site_name, s.latitude AS lat, s.longitude AS lng,
+                t.ticket_id, t.subject, t.status, t.priority, t.account_name, NULL AS via_device");
+
+        $deviceLinked = DB::table('sonar_ticket_links as t')
+            ->join('devices as d', 'd.id', '=', 't.notable_id')
+            ->join('sites as s', 's.id', '=', 'd.site_id')
+            ->where('t.notable_type', \App\Models\Device::class)
+            ->whereNotNull('s.latitude')->whereNotNull('s.longitude')
+            ->where($open)
+            ->selectRaw("s.id AS site_id, s.name AS site_name, s.latitude AS lat, s.longitude AS lng,
+                t.ticket_id, t.subject, t.status, t.priority, t.account_name, d.name AS via_device");
+
+        $bySite = [];
+        foreach ($siteLinked->unionAll($deviceLinked)->get() as $r) {
+            $siteId = (int) $r->site_id;
+            $bySite[$siteId] ??= [
+                'site_id' => $siteId,
+                'name' => $r->site_name,
+                'lat' => (float) $r->lat,
+                'lng' => (float) $r->lng,
+                'tickets' => [],
+            ];
+            $bySite[$siteId]['tickets'][] = [
+                'ticket_id' => (int) $r->ticket_id,
+                'url' => str_replace('{id}', (string) $r->ticket_id, $template),
+                'subject' => $r->subject,
+                'status' => $r->status,
+                'priority' => $r->priority,
+                'account_name' => $r->account_name,
+                'via_device' => $r->via_device,
+            ];
+        }
+
+        return response()->json(['data' => array_values($bySite)]);
+    }
+
     /** Geocode an address to coordinates via the configured provider (proxied + best-effort). */
     public function geocode(Request $request): JsonResponse
     {

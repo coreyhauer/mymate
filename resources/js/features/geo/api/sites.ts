@@ -81,6 +81,44 @@ export function useBackhauls() {
     });
 }
 
+/** One open Sonar ticket as the map's ticket layer needs it. */
+export interface GeoTicket {
+    ticket_id: number;
+    /** Sonar deep-link (same template SonarTicketsSection uses). */
+    url: string;
+    subject: string | null;
+    status: string | null;
+    priority: string | null;
+    account_name: string | null;
+    /** Device the ticket is linked to, when it came in via a device rather than the site. */
+    via_device: string | null;
+}
+
+/** A placed site carrying at least one open Sonar ticket. */
+export interface GeoTicketSite {
+    site_id: number;
+    name: string;
+    lat: number;
+    lng: number;
+    tickets: GeoTicket[];
+}
+
+/**
+ * Sites with open Sonar tickets, for the toggleable ticket layer. Only fetched while the layer
+ * is on; refetched periodically so the icons track the 15-min server-side ticket refresh.
+ */
+export function useGeoTickets(enabled: boolean) {
+    return useQuery({
+        queryKey: ['geo', 'tickets'],
+        queryFn: async (): Promise<GeoTicketSite[]> => {
+            const { data } = await apiClient.get<{ data: GeoTicketSite[] }>('/geo/tickets');
+            return data.data;
+        },
+        enabled,
+        refetchInterval: 2 * 60 * 1000,
+    });
+}
+
 /** All sites with their device + down counts (the geo map's primary markers). */
 export function useSites() {
     return useQuery({
