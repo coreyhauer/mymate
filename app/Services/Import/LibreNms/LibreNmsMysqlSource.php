@@ -5,6 +5,7 @@ namespace App\Services\Import\LibreNms;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use DateTimeInterface;
 use PDO;
 use RuntimeException;
 
@@ -14,7 +15,7 @@ use RuntimeException;
  * best-effort against the documented LibreNMS schema; a missing table (e.g. no custom maps on
  * an older version) is skipped rather than fatal.
  */
-class LibreNmsMysqlSource implements LibreNmsSource
+class LibreNmsMysqlSource implements LibreNmsSource, \App\Services\Rf\LibreNmsRfSource
 {
     private ?ConnectionInterface $conn = null;
 
@@ -102,5 +103,64 @@ class LibreNmsMysqlSource implements LibreNmsSource
         }
 
         return $out;
+    }
+
+    /**
+     * RF wireless sensor readings for the link-health pull (App\Services\Rf\LibreNmsRfSource).
+     * `capacity` and `ccq` are deliberately absent from the class list - dead/unreliable OIDs
+     * (see App\Actions\Rf\PullLibreNmsRfMetrics). LibreNMS stores the mgmt IP in `hostname`
+     * for this fleet, which is what the pull matches My Mate devices on.
+     */
+    public function wirelessSensors(?DateTimeInterface $since = null): array
+    {
+        $query = $this->connection()->table('wireless_sensors as s')
+            ->join('devices as d', 'd.device_id', '=', 's.device_id')
+            ->whereIn('s.sensor_class', ['rssi', 'snr', 'noise-floor', 'rate', 'frequency', 'distance', 'power', 'utilization'])
+            ->where('s.sensor_deleted', 0)
+            ->select('s.device_id', 'd.hostname as ip', 's.sensor_class', 's.sensor_type', 's.sensor_index', 's.sensor_descr', 's.sensor_current', 's.lastupdate');
+
+        if ($since !== null) {
+            $query->where('s.lastupdate', '>', $since->getTimestamp());
+        }
+
+        return $query->get()->map(static fn ($r): array => [
+            'device_id' => (int) $r->device_id,
+            'ip' => (string) $r->ip,
+            'sensor_class' => (string) $r->sensor_class,
+            'sensor_type' => isset($r->sensor_type) ? (string) $r->sensor_type : null,
+            'sensor_index' => isset($r->sensor_index) ? (string) $r->sensor_index : null,
+            'sensor_descr' => isset($r->sensor_descr) ? (string) $r->sensor_descr : null,
+            'sensor_current' => isset($r->sensor_current) ? (float) $r->sensor_current : null,
+            'lastupdate' => isset($r->lastupdate) ? (string) $r->lastupdate : null,
+        ])->all();
+    }
+
+    /**
+     * Per-device error-counter deltas from the highest-ifSpeed non-deleted port (the
+     * backhaul-interface proxy - see the LibreNmsRfSource interface docblock). Uses
+     * LibreNMS's own ifInErrors_delta/ifOutErrors_delta, already a per-poll delta.
+     */
+    public function portErrorCounters(): array
+    {
+        $rows = $this->connection()->select(<<<'SQL'
+            SELECT p.device_id, d.hostname AS ip,
+                   p.ifInErrors_delta AS if_errors_in, p.ifOutErrors_delta AS if_errors_out
+              FROM ports p
+              JOIN devices d ON d.device_id = p.device_id
+              JOIN (
+                    SELECT device_id, MAX(ifSpeed) AS max_speed
+                      FROM ports WHERE deleted = 0 GROUP BY device_id
+                   ) fastest
+                ON fastest.device_id = p.device_id AND p.ifSpeed = fastest.max_speed
+             WHERE p.deleted = 0
+             GROUP BY p.device_id
+            SQL);
+
+        return array_map(static fn ($r): array => [
+            'device_id' => (int) $r->device_id,
+            'ip' => (string) $r->ip,
+            'if_errors_in' => isset($r->if_errors_in) ? (int) $r->if_errors_in : null,
+            'if_errors_out' => isset($r->if_errors_out) ? (int) $r->if_errors_out : null,
+        ], $rows);
     }
 }
