@@ -9,7 +9,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
 import { useBackhauls, useGeoDevices, useGeoTickets, useSites, type Backhaul, type GeoDevice, type GeoTicketSite, type Site } from '../api/sites';
 import { useMapChannel } from '../../topology/hooks/useMapChannel';
-import { selectDevice, setInspectorOpen } from '../../../lib/shellStore';
+import { clearGeoFocus, selectDevice, setInspectorOpen, useGeoFocusDeviceId } from '../../../lib/shellStore';
 import { GeoSearch, type GeoHit } from './GeoSearch';
 import { SitePopup } from './SitePopup';
 
@@ -497,6 +497,30 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
             if (map.getSource('weather')) map.removeSource('weather');
         };
     }, [weatherOn, ready, weatherUrl]);
+
+    // One-shot geo focus from elsewhere in the app (outage table's "Geo" button). The Dude
+    // equivalent is "open this device's sub-map" - here that means: fly to the device's TOWER
+    // and open the site popup in its clicked state, so the whole tower's gear is on screen at
+    // once. Siteless devices fall back to their own inspector. Consumed after the flight so
+    // later manual visits to the geo view don't re-fly.
+    const geoFocusId = useGeoFocusDeviceId();
+    useEffect(() => {
+        if (geoFocusId == null || !ready) return;
+        const map = mapRef.current;
+        if (!map) return;
+        const dev = (devices ?? []).find((d) => d.id === geoFocusId);
+        if (!dev) return; // device feed still loading - effect re-runs when it lands
+        const site = dev.site_id != null ? (sites ?? []).find((s) => s.id === dev.site_id) : undefined;
+        if (dev.site_id != null && !site) return; // sites still loading - wait for them
+        map.flyTo({ center: [dev.lng, dev.lat], zoom: Math.max(map.getZoom(), DEVICE_ZOOM), speed: 1.8 });
+        if (site) {
+            openSitePopup.current(site.id);
+        } else {
+            selectDevice(dev.id);
+            setInspectorOpen(true);
+        }
+        clearGeoFocus();
+    }, [geoFocusId, ready, devices, sites]);
 
     // Sonar-ticket layer: bright-purple ticket stubs on every site with an open ticket, at all
     // zooms (the point is spotting them from the wide view). Hover shows the tickets; click

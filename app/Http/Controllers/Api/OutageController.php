@@ -51,6 +51,24 @@ class OutageController extends Controller
             $query->whereHas('device', fn ($q) => $q->where('device_type', '!=', DeviceType::Ont->value));
         }
 
-        return OutageResource::collection($query->limit(500)->get());
+        $outages = $query->with('device.site')->limit(500)->get();
+
+        // Latest operator note per device, one query for the whole page (an eager
+        // `notes => limit(1)` would apply the limit across ALL parents, not per-device).
+        // Ridden into the payload so the outage table can show a note column - triage
+        // context ("gen on site", "tree on line") right where the sorting happens.
+        $latestNotes = \App\Models\Note::query()
+            ->where('notable_type', \App\Models\Device::class)
+            ->whereIn('notable_id', $outages->pluck('device_id')->unique())
+            ->orderByDesc('created_at')
+            ->get()
+            ->unique('notable_id')
+            ->keyBy('notable_id');
+
+        foreach ($outages as $outage) {
+            $outage->setAttribute('latest_device_note', $latestNotes[$outage->device_id]->body ?? null);
+        }
+
+        return OutageResource::collection($outages);
     }
 }

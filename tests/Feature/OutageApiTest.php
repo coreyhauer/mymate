@@ -44,6 +44,23 @@ class OutageApiTest extends TestCase
             ->assertJsonPath('data.0.device_name', 'CPE-X');
     }
 
+    public function test_outage_rows_carry_ip_site_and_latest_device_note(): void
+    {
+        $this->actingAsUser();
+        $site = \App\Models\Site::factory()->at(39.05, -88.74)->create(['name' => 'Gilbert Park']);
+        $device = Device::factory()->create(['name' => 'gp-sw', 'mgmt_ip' => '10.212.1.108', 'site_id' => $site->id]);
+        $device->notes()->create(['body' => 'older note', 'author_name' => 'a', 'created_at' => now()->subDay()]);
+        $device->notes()->create(['body' => 'tree on the line', 'author_name' => 'a']);
+        Outage::factory()->for($device)->create();
+
+        $this->getJson('/api/outages')
+            ->assertOk()
+            ->assertJsonPath('data.0.mgmt_ip', '10.212.1.108')
+            ->assertJsonPath('data.0.site_id', $site->id)
+            ->assertJsonPath('data.0.site_name', 'Gilbert Park')
+            ->assertJsonPath('data.0.device_note', 'tree on the line');
+    }
+
     public function test_filters_by_state_and_device(): void
     {
         $this->actingAsUser();

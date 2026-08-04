@@ -441,6 +441,11 @@ export interface Outage {
     acknowledged: boolean;
     ack_note: string | null;
     is_cpe: boolean;
+    mgmt_ip: string | null;
+    site_id: number | null;
+    site_name: string | null;
+    /** Latest operator note on the device - triage context in the outage table. */
+    device_note: string | null;
 }
 
 // Live throughput event (App\Events\InterfaceUtilUpdated) - coalesced across devices.

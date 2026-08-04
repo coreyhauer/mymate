@@ -31,6 +31,9 @@ type ShellState = {
     // inspector - exactly one of the two is ever set (see selectDevice/selectSite). NOT
     // persisted: a reload lands you back on the map, not inside a panel you left open.
     selectedSiteId: number | null;
+    // One-shot "fly the geo map to this device" request (outage row's Geo button). The geo
+    // map consumes and clears it once the flight starts; NOT persisted.
+    geoFocusDeviceId: number | null;
     activeMapId: number | null;
     // Kept as flat primitive records (not a nested object per id) so each getSnapshot
     // returns a stable scalar - a fresh object per render would loop useSyncExternalStore.
@@ -108,6 +111,7 @@ let state: ShellState = {
     inspectorOpen: false,
     selectedDeviceId: saved.selectedDeviceId ?? null,
     selectedSiteId: null,
+    geoFocusDeviceId: null,
     activeMapId: saved.activeMapId ?? null,
     chartModeById: saved.chartModeById ?? {},
     ifaceFilterById: saved.ifaceFilterById ?? {},
@@ -176,6 +180,27 @@ export function selectDevice(id: number | null): void {
     if (state.selectedDeviceId === id && (id === null || state.selectedSiteId === null)) return;
     state = { ...state, selectedDeviceId: id, selectedSiteId: id === null ? state.selectedSiteId : null };
     emit();
+}
+
+/**
+ * Ask the geo map to fly to a device (and open its inspector) - the outage table's "jump to
+ * map" action. Switches to the geo view; GeoMapLibre watches the id, flies once its data is
+ * ready, then calls {@link clearGeoFocus} so a later manual visit doesn't re-fly.
+ */
+export function focusDeviceOnGeo(id: number): void {
+    state = { ...state, geoFocusDeviceId: id };
+    applyView('geo', { push: true }); // emits when the view changes...
+    emit(); // ...and this covers the already-on-geo case (applyView early-returns there)
+}
+
+export function clearGeoFocus(): void {
+    if (state.geoFocusDeviceId === null) return;
+    state = { ...state, geoFocusDeviceId: null };
+    emit();
+}
+
+export function useGeoFocusDeviceId(): number | null {
+    return useSyncExternalStore(subscribe, () => state.geoFocusDeviceId);
 }
 
 /** Select a site for the geo inspector. Mirror of {@link selectDevice} - opening one closes the other. */

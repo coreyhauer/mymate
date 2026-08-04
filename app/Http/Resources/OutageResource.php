@@ -22,6 +22,11 @@ class OutageResource extends JsonResource
             'acknowledged' => (bool) ($this->device?->acknowledged ?? false),
             'ack_note' => $this->device?->ack_note,
             'is_cpe' => $this->device?->device_type === DeviceType::Ont,
+            'mgmt_ip' => $this->device?->mgmt_ip,
+            'site_id' => $this->device?->site_id,
+            'site_name' => $this->device?->site?->name,
+            // Latest operator note on the device (set by OutageController) - triage context.
+            'device_note' => $this->latest_device_note ?? null,
         ];
     }
 }
