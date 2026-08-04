@@ -33,17 +33,25 @@ class PollInterfaces
 
         $startedAt = microtime(true);
         $now = now()->format('Y-m-d H:i:s');
-        $devices = Device::with('credential')->whereIn('id', $deviceIds)->get();
+        $devices = Device::with('credential')->whereIn('id', $deviceIds)
+            // Devices inside an active connect-backoff window are skipped outright -
+            // no socket attempted (see App\Services\Polling\ConnectBackoff).
+            ->where(fn ($q) => $q->whereNull('poll_backoff_until')->orWhere('poll_backoff_until', '<=', now()))
+            ->get();
 
         $rows = [];
         $deviceFrames = [];
         $sampleRows = [];
         $failed = 0;
 
+        $backoff = new \App\Services\Polling\ConnectBackoff;
+
         foreach ($devices as $device) {
             try {
                 $result = ($this->pollDevice)($device);
+                $backoff->recordSuccess($device);
             } catch (\Throwable $e) {
+                $backoff->recordFailure($device, $e);
                 // One black-holing/erroring device must not take the batch down.
                 // (Driver exceptions carry host + transport error only, never creds.)
                 $failed++;

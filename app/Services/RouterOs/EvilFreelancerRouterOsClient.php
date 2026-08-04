@@ -26,9 +26,29 @@ class EvilFreelancerRouterOsClient implements RouterOsClient
             ]);
         } catch (Throwable $e) {
             // Message carries host + transport error only - never the credentials.
-            throw new RouterOsClientException("RouterOS connect failed for {$target->host}: ".$e->getMessage(), 0, $e);
+            throw new RouterOsClientException(
+                "RouterOS connect failed for {$target->host}: ".$e->getMessage(),
+                0,
+                $e,
+                transport: self::isTransportFailure($e),
+            );
         }
 
         return new EvilFreelancerRouterOsConnection($client);
+    }
+
+    /**
+     * Whether a client-library throwable means the device never answered at the wire.
+     *
+     * evilfreelancer/routeros-api-php throws ConnectException from the socket-level
+     * connect (timeout/refused/no route) and BadCredentialsException only from login(),
+     * which runs AFTER that socket connect succeeded - so bad credentials prove the
+     * device is alive and must NOT read as transport. Everything else (Config/Client/
+     * Stream exceptions, unexpected throwables) means we never got a working session,
+     * conservatively treated as transport so a black-holing port still backs off.
+     */
+    public static function isTransportFailure(Throwable $e): bool
+    {
+        return ! $e instanceof \RouterOS\Exceptions\BadCredentialsException;
     }
 }

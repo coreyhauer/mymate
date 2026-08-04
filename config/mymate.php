@@ -56,6 +56,15 @@ return [
     // Interface throughput loop. intervals in seconds.
     'poll' => [
         'interval' => (int) env('MYMATE_POLL_INTERVAL', 12),
+
+        // Per-device connect-failure circuit breaker (App\Services\Polling\ConnectBackoff):
+        // consecutive TRANSPORT failures walk this backoff ladder (minutes) and the poll
+        // batches skip the device outright until the window expires. Auth/credential
+        // failures never trip it - the device answered.
+        'connect_backoff' => [
+            'enabled' => (bool) env('MYMATE_POLL_BACKOFF_ENABLED', true),
+            'schedule_minutes' => [1, 2, 5, 10, 30],
+        ],
         // How often the loop re-runs interface discovery (names/capacity change rarely).
         'discover_interval' => (int) env('MYMATE_DISCOVER_INTERVAL', 600),
 
@@ -135,6 +144,21 @@ return [
     // colours by load instead of staying neutral. A per-link bandwidth override always wins.
     'links' => [
         'default_speed_mbps' => (int) env('MYMATE_LINK_DEFAULT_SPEED_MBPS', 1000),
+    ],
+
+    // RF/link-health ingestion straight from the LibreNMS MySQL (wireless_sensors et al,
+    // read-only) - App\Actions\Rf\PullLibreNmsRfMetrics on a ~5-minute schedule. Enabled
+    // derives from a configured host so an install without LibreNMS silently no-ops.
+    'librenms_rf' => [
+        'enabled' => (bool) env('MYMATE_LIBRENMS_RF_ENABLED', env('MYMATE_LIBRENMS_DB_HOST') !== null),
+        'host' => env('MYMATE_LIBRENMS_DB_HOST'),
+        'port' => (int) env('MYMATE_LIBRENMS_DB_PORT', 3306),
+        'database' => env('MYMATE_LIBRENMS_DB_DATABASE', 'librenms'),
+        'username' => env('MYMATE_LIBRENMS_DB_USERNAME'),
+        'password' => env('MYMATE_LIBRENMS_DB_PASSWORD'),
+        // A reading whose LibreNMS-side lastupdate is older than this reads as STALE
+        // (SiteLink::rfHealth) - never silently shown as current.
+        'stale_after_minutes' => (int) env('MYMATE_LIBRENMS_RF_STALE_MINUTES', 30),
     ],
 
     // Sonar ticket links (My Mate only ever READS Sonar's GraphQL ticketing API - it never

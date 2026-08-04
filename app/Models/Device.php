@@ -40,6 +40,8 @@ class Device extends Model
         'monitored' => 'boolean',
         'acknowledged' => 'boolean',
         'ack_at' => 'datetime',
+        // Connect-backoff circuit breaker window (App\Services\Polling\ConnectBackoff).
+        'poll_backoff_until' => 'datetime',
         'device_type' => DeviceType::class,
         'upgrade_status' => UpgradeStatus::class,
         'last_change' => 'datetime',

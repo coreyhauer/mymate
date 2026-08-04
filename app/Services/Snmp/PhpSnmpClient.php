@@ -42,7 +42,7 @@ class PhpSnmpClient implements SnmpClient
                 if (self::isAbsence($err)) {
                     return [];
                 }
-                throw new SnmpClientException("SNMP get failed for {$host}: ".$err);
+                throw new SnmpClientException("SNMP get failed for {$host}: ".$err, transport: true);
             }
 
             return is_array($result) ? array_map(self::plain(...), $result) : [];
@@ -71,7 +71,7 @@ class PhpSnmpClient implements SnmpClient
                 if (self::isAbsence($err)) {
                     return [];
                 }
-                throw new SnmpClientException("SNMP walk failed for {$host}: ".$err);
+                throw new SnmpClientException("SNMP walk failed for {$host}: ".$err, transport: true);
             }
 
             return is_array($result) ? array_map(self::plain(...), $result) : [];
