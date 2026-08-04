@@ -27,6 +27,11 @@ Schedule::command('mymate:backup:run --scheduled')->hourly()->name('device-backu
 // Sweep cached RouterOS upgrade packages past the retention window (default 90 days).
 Schedule::command('mymate:routeros:prune-packages')->daily()->name('routeros-package-prune')->withoutOverlapping();
 
+// Cap the failed-jobs table at a week. Chronic poll-batch timeouts produce ~1k rows/day;
+// left unpruned it reached 179k rows / multi-GB and `queue:failed` became a 12GB memory
+// bomb that OOM-wedged this box (2026-08-04). A week is plenty to diagnose anything real.
+Schedule::command('queue:prune-failed --hours=168')->daily()->name('failed-jobs-prune')->withoutOverlapping();
+
 // RF/link-health: pull the latest wireless sensor readings from LibreNMS (~16k devices,
 // one MySQL round-trip - see PullLibreNmsRfMetrics) into rf_link_samples + rf_link_state.
 // No-ops when mymate.librenms_rf isn't configured.
