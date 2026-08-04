@@ -118,6 +118,26 @@ function ticketHoverHtml(site: GeoTicketSite): string {
     </div>`;
 }
 
+/**
+ * Priority filter for the ticket layer. "High" is the urgent view (HIGH + CRITICAL); "Low" is
+ * its complement (LOW / MEDIUM / unprioritised), so the two partitions add up to "All" and a
+ * ticket can never vanish from both filtered views.
+ */
+type TicketFilter = 'all' | 'high' | 'low';
+const TICKET_FILTERS: { key: TicketFilter; label: string; title: string }[] = [
+    { key: 'all', label: 'All', title: 'Every open ticket' },
+    { key: 'high', label: 'High', title: 'HIGH and CRITICAL priority' },
+    { key: 'low', label: 'Low', title: 'LOW, MEDIUM and unprioritised' },
+];
+
+function filterTicketSites(sites: GeoTicketSite[], filter: TicketFilter): GeoTicketSite[] {
+    if (filter === 'all') return sites;
+    const isHigh = (p: string | null) => p === 'HIGH' || p === 'CRITICAL';
+    return sites
+        .map((s) => ({ ...s, tickets: s.tickets.filter((t) => isHigh(t.priority) === (filter === 'high')) }))
+        .filter((s) => s.tickets.length > 0);
+}
+
 /** Ticket-layer markers: one per site that has at least one open Sonar ticket. */
 function ticketPoints(sites: GeoTicketSite[]): PointFeatures {
     return {
@@ -205,6 +225,7 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
     const [ready, setReady] = useState(false); // map style + our layers are in place
     const [weatherOn, setWeatherOn] = useState(false);
     const [ticketsOn, setTicketsOn] = useState(false);
+    const [ticketFilter, setTicketFilter] = useState<TicketFilter>('all');
     const { data: ticketSites } = useGeoTickets(ticketsOn); // fetched only while the layer is on
     const ticketSitesRef = useRef<GeoTicketSite[]>([]);
 
@@ -514,13 +535,15 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
         };
     }, [ticketsOn, ready]);
 
-    // Keep the ticket source current as the query refetches (the layer effect above only runs
-    // on toggle; data updates flow in here, the same split rebuild() uses for the other sources).
+    // Keep the ticket source current as the query refetches or the priority filter changes
+    // (the layer effect above only runs on toggle; data updates flow in here, the same split
+    // rebuild() uses for the other sources). The ref holds the FILTERED list, so hover cards
+    // and click-through only ever see the tickets the operator asked to look at.
     useEffect(() => {
-        ticketSitesRef.current = ticketSites ?? [];
+        ticketSitesRef.current = filterTicketSites(ticketSites ?? [], ticketFilter);
         const map = mapRef.current;
         (map?.getSource('tickets') as maplibregl.GeoJSONSource | undefined)?.setData(ticketPoints(ticketSitesRef.current));
-    }, [ticketSites]);
+    }, [ticketSites, ticketFilter]);
 
     /**
      * Fly to a search hit. A site lands at a zoom where its own marker has split out of any
@@ -555,6 +578,25 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
             <div ref={containerRef} className="h-full w-full bg-[#0d0d11]" />
             <GeoSearch sites={sites ?? []} devices={devices ?? []} onPick={flyToHit} />
             <div className="absolute right-3 top-3 z-10 flex gap-2">
+                {ticketsOn && (
+                    <div className="flex overflow-hidden rounded-lg ring-1 ring-purple-400/40 backdrop-blur">
+                        {TICKET_FILTERS.map((f) => (
+                            <button
+                                key={f.key}
+                                type="button"
+                                onClick={() => setTicketFilter(f.key)}
+                                title={f.title}
+                                className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                                    ticketFilter === f.key
+                                        ? 'bg-purple-500/30 text-purple-100'
+                                        : 'bg-black/50 text-white/60 hover:bg-black/70'
+                                }`}
+                            >
+                                {f.label}
+                            </button>
+                        ))}
+                    </div>
+                )}
                 <button
                     type="button"
                     onClick={() => setTicketsOn((v) => !v)}
