@@ -233,6 +233,10 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
     // Materialised per-device RF/link-health state (LibreNMS-sourced, ~5-min cadence). ?since= for deltas.
     Route::get('rf-link-state', [\App\Http\Controllers\Api\RfLinkStateController::class, 'index'])->name('rf-link-state.index');
 
+    // Latest known PPPoE session state per concentrator (RouterOS /ppp/active, ~5-min sweep,
+    // wholesale-replaced per device). ?since= for deltas, ?device_id=/?username=/?q=, cursor-paginated.
+    Route::get('pppoe-sessions', [\App\Http\Controllers\Api\PppoeSessionController::class, 'index'])->name('pppoe-sessions.index');
+
     // MikroTik "The Dude" import (FR-Dude): upload a dude.db, then poll the run for
     // live stage/percent/ETA; cancel stops it cleanly.
     Route::get('imports', [ImportController::class, 'index'])->name('imports.index');
