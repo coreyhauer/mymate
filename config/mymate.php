@@ -146,6 +146,9 @@ return [
         'default_speed_mbps' => (int) env('MYMATE_LINK_DEFAULT_SPEED_MBPS', 1000),
     ],
 
+    // Google Chat webhook for operational tripwires (queue guard). Empty = log-only.
+    'ops_chat_webhook' => env('MYMATE_OPS_CHAT_WEBHOOK', ''),
+
     // RF/link-health ingestion straight from the LibreNMS MySQL (wireless_sensors et al,
     // read-only) - App\Actions\Rf\PullLibreNmsRfMetrics on a ~5-minute schedule. Enabled
     // derives from a configured host so an install without LibreNMS silently no-ops.

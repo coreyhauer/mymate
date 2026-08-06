@@ -27,6 +27,10 @@ Schedule::command('mymate:backup:run --scheduled')->hourly()->name('device-backu
 // Sweep cached RouterOS upgrade packages past the retention window (default 90 days).
 Schedule::command('mymate:routeros:prune-packages')->daily()->name('routeros-package-prune')->withoutOverlapping();
 
+// Queue-flood tripwire: alert to Chat while a work queue is >10k deep or redis >5GB -
+// the silent-buildup signature of both August 2026 resource incidents on this box.
+Schedule::command('mymate:ops:queue-guard')->everyTenMinutes()->name('queue-guard')->withoutOverlapping();
+
 // Cap the failed-jobs table at a week. Chronic poll-batch timeouts produce ~1k rows/day;
 // left unpruned it reached 179k rows / multi-GB and `queue:failed` became a 12GB memory
 // bomb that OOM-wedged this box (2026-08-04). A week is plenty to diagnose anything real.
