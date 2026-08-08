@@ -39,10 +39,16 @@ class OutageController extends Controller
             $query->whereNotNull('ended_at');
         }
 
-        // Default: drop outages whose device has been acknowledged. A single-device
-        // lookup (device_id) always shows its history regardless.
+        // Default: drop outages the operator has already muted. There are TWO ways to mute a
+        // device and both must count here, or the views disagree: `acknowledged` (the Ack
+        // button) and `monitored=false` (monitoring toggled off / the `(acked)` name
+        // convention). The geo map has always filtered on `monitored`, so before this a
+        // polling-disabled device vanished from the map but sat in this list forever - and
+        // "forever" was literal, because PingFleet skips unmonitored devices, so its open
+        // outage could never close (reported by the NOC 2026-08-08). A single-device lookup
+        // (device_id) always shows full history regardless.
         if ($deviceId <= 0 && ! $request->boolean('include_acked')) {
-            $query->whereHas('device', fn ($q) => $q->where('acknowledged', false));
+            $query->whereHas('device', fn ($q) => $q->where('acknowledged', false)->where('monitored', true));
         }
 
         // Default: drop customer-CPE outages (device_type=ont) so the main list only

@@ -44,6 +44,38 @@ class OutageApiTest extends TestCase
             ->assertJsonPath('data.0.device_name', 'CPE-X');
     }
 
+    public function test_unmonitored_devices_are_muted_from_the_outage_list_like_acked_ones(): void
+    {
+        // The geo map has always hidden unmonitored devices; the outage list only honoured
+        // `acknowledged`, so pausing polling left a device on the list forever - and forever
+        // was literal, since PingFleet skips it and the outage could never close.
+        $this->actingAsUser();
+        $paused = Device::factory()->create(['name' => 'paused-radio', 'monitored' => false]);
+        $live = Device::factory()->create(['name' => 'live-radio', 'monitored' => true]);
+        Outage::factory()->for($paused)->create();
+        Outage::factory()->for($live)->create();
+
+        $names = collect($this->getJson('/api/outages')->assertOk()->json('data'))->pluck('device_name');
+        $this->assertContains('live-radio', $names->all());
+        $this->assertNotContains('paused-radio', $names->all());
+
+        // ...but the "show acked" escape hatch still reveals them.
+        $all = collect($this->getJson('/api/outages?include_acked=1')->json('data'))->pluck('device_name');
+        $this->assertContains('paused-radio', $all->all());
+    }
+
+    public function test_turning_monitoring_off_closes_the_open_outage(): void
+    {
+        $this->actingAsUser();
+        $device = Device::factory()->create(['monitored' => true]);
+        app(\App\Actions\Outages\RecordOutage::class)->open($device);
+
+        app(\App\Actions\Devices\UpdateDevice::class)($device, ['monitored' => false]);
+
+        $outage = Outage::where('device_id', $device->id)->firstOrFail();
+        $this->assertNotNull($outage->ended_at, 'pausing a device must close its open outage');
+    }
+
     public function test_outage_rows_carry_ip_site_and_latest_device_note(): void
     {
         $this->actingAsUser();
