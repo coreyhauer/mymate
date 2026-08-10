@@ -5,8 +5,8 @@ import { ClipboardText } from '@phosphor-icons/react';
 import { MapLegend } from './MapLegend';
 
 const ITEMS: { id: View; label: string; icon: Icon }[] = [
-    { id: 'map', label: 'Map', icon: MapTrifold },
     { id: 'geo', label: 'Geo map', icon: GlobeHemisphereWest },
+    { id: 'map', label: 'Map', icon: MapTrifold },
     { id: 'dashboard', label: 'Dashboard', icon: SquaresFour },
     { id: 'devices', label: 'Devices', icon: ListDashes },
     { id: 'discovery', label: 'Discovery', icon: MagnifyingGlass },

@@ -54,8 +54,8 @@ type ShellState = {
 // reload / shared link / Back-Forward restores the page. No router lib - rides the
 // server catch-all (GET /{any} -> app). Page only; map/device keep default-on-load.
 const VIEW_TO_PATH: Record<View, string> = {
-    map: '/',
-    geo: '/geo',
+    geo: '/',
+    map: '/topology',
     dashboard: '/dashboard',
     devices: '/devices',
     discovery: '/discovery',
@@ -68,13 +68,22 @@ const VIEW_TO_PATH: Record<View, string> = {
     import: '/import',
 };
 
+// Old canonical paths that moved when the geo map became the landing page; keep
+// bookmarks and external links working (replaceState canonicalises on load).
+const LEGACY_PATH_TO_VIEW: Record<string, View> = {
+    '/geo': 'geo',
+    '/map': 'map',
+};
+
 function pathToView(pathname: string): View {
     const p = pathname.replace(/\/+$/, '').toLowerCase() || '/';
-    return (Object.keys(VIEW_TO_PATH) as View[]).find((v) => VIEW_TO_PATH[v] === p) ?? 'map';
+    return (
+        (Object.keys(VIEW_TO_PATH) as View[]).find((v) => VIEW_TO_PATH[v] === p) ?? LEGACY_PATH_TO_VIEW[p] ?? 'geo'
+    );
 }
 
 // Derive the initial view from the URL at module load (before first render -> no flash).
-const initialView: View = typeof window !== 'undefined' ? pathToView(window.location.pathname) : 'map';
+const initialView: View = typeof window !== 'undefined' ? pathToView(window.location.pathname) : 'geo';
 
 // --- Persistence: remember the selected device, active map, and
 // per-device inspector prefs across reloads (localStorage). The page lives in the URL
