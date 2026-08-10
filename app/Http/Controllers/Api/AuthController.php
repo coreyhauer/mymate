@@ -66,6 +66,6 @@ class AuthController extends Controller
     {
         $user = $request->user();
 
-        return ['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'is_admin' => $user->isAdmin()];
+        return ['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'is_admin' => $user->isAdmin(), 'can_move_devices' => $user->canMoveDevices()];
     }
 }

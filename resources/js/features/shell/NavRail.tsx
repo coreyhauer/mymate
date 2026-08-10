@@ -1,6 +1,7 @@
 import { MapTrifold, GlobeHemisphereWest, SquaresFour, ListDashes, MagnifyingGlass, Warning, Bell, ArrowCircleUp, Archive, GearSix, DownloadSimple, X, type Icon } from '@phosphor-icons/react';
 import { useView, setView, useNavOpen, setNavOpen, type View } from '../../lib/shellStore';
 import { useUpdateCheck } from '../settings/api/updateCheck';
+import { ClipboardText } from '@phosphor-icons/react';
 import { MapLegend } from './MapLegend';
 
 const ITEMS: { id: View; label: string; icon: Icon }[] = [
@@ -14,6 +15,7 @@ const ITEMS: { id: View; label: string; icon: Icon }[] = [
     { id: 'upgrades', label: 'Upgrades', icon: ArrowCircleUp },
     { id: 'backups', label: 'Backups', icon: Archive },
     { id: 'import', label: 'Import', icon: DownloadSimple },
+    { id: 'proposals', label: 'Site review', icon: ClipboardText },
     { id: 'settings', label: 'Settings', icon: GearSix },
 ];
 

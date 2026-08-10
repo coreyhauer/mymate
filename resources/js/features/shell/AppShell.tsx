@@ -12,6 +12,7 @@ import { DashboardView } from '../dashboard/components/DashboardView';
 import { DevicesView } from '../devices/components/DevicesView';
 import { DiscoveryView } from '../discovery/components/DiscoveryView';
 import { OutagesView } from '../outages/components/OutagesView';
+import { ProposalsView } from '../proposals/components/ProposalsView';
 import { useOutages } from '../outages/api/getOutages';
 import { SettingsView } from '../settings/components/SettingsView';
 import { AlertsView } from '../alerts/components/AlertsView';
@@ -70,6 +71,7 @@ export function AppShell() {
             {view === 'alerts' && <AlertsView />}
             {view === 'upgrades' && <UpgradesView />}
             {view === 'backups' && <BackupsView />}
+            {view === 'proposals' && <ProposalsView />}
             {view === 'settings' && <SettingsView />}
             {view === 'import' && <ImportView />}
         </main>

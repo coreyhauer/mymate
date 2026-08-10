@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import maplibregl from 'maplibre-gl/dist/maplibre-gl-csp';
-import { CaretRight, Users } from '@phosphor-icons/react';
+import { CaretRight, Users, ArrowsLeftRight } from '@phosphor-icons/react';
+import { useCanMoveDevices } from '../../auth/api/auth';
+import { MoveDeviceDialog } from './MoveDeviceDialog';
 import { StatusDot } from '../../../components/StatusDot';
 import { NotesSection } from '../../annotations/components/NotesSection';
 import { SonarTicketsSection } from '../../annotations/components/SonarTicketsSection';
@@ -59,11 +61,14 @@ function sortForTriage(devices: GeoDevice[]): GeoDevice[] {
  * how long for. Clicking it hands the selection to the device inspector in the right rail and
  * dismisses the popup, the way the original did.
  */
-function DeviceRow({ device, onPick }: { device: GeoDevice; onPick: () => void }) {
+function DeviceRow({ device, siteId, onPick }: { device: GeoDevice; siteId: number | null; onPick: () => void }) {
     const dur = device.status === 'down' ? outageFor(device.down_since) : null;
     const affected = device.status === 'down';
+    const canMove = useCanMoveDevices();
+    const [moving, setMoving] = useState(false);
 
     return (
+        <div className="group flex w-full items-center rounded-md transition-colors duration-200 ease-fluid hover:bg-white/[0.06]">
         <button
             type="button"
             onClick={() => {
@@ -72,7 +77,7 @@ function DeviceRow({ device, onPick }: { device: GeoDevice; onPick: () => void }
                 onPick();
             }}
             title={`Open ${device.name}`}
-            className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors duration-200 ease-fluid hover:bg-white/[0.06]"
+            className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1 text-left"
         >
             <StatusDot status={device.status} />
             <span className="min-w-0 flex-1 truncate text-[11.5px] text-white/85">{device.name}</span>
@@ -100,6 +105,25 @@ function DeviceRow({ device, onPick }: { device: GeoDevice; onPick: () => void }
                 </span>
             )}
         </button>
+        {canMove && (
+            <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setMoving(true); }}
+                title="Move this device to a different site"
+                className="mr-1 shrink-0 rounded p-1 text-white/45 transition-colors hover:bg-white/[0.10] hover:text-emerald-300"
+            >
+                <ArrowsLeftRight weight="bold" className="h-3 w-3" />
+            </button>
+        )}
+        {moving && (
+            <MoveDeviceDialog
+                deviceId={device.id}
+                deviceName={device.name}
+                currentSiteId={siteId}
+                onClose={() => setMoving(false)}
+            />
+        )}
+        </div>
     );
 }
 
@@ -212,7 +236,7 @@ function SitePopupBody({ site, onClose }: { site: Site; onClose: () => void }) {
                     ) : (
                         <>
                             {visible.map((d) => (
-                                <DeviceRow key={d.id} device={d} onPick={onClose} />
+                                <DeviceRow key={d.id} device={d} siteId={site.id} onPick={onClose} />
                             ))}
                             {devs.length > visible.length && (
                                 <button

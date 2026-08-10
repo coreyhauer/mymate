@@ -304,4 +304,13 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
         ->name('discovery-candidates.approve');
     Route::post('discovery-candidates/{candidate}/ignore', [DiscoveryCandidateController::class, 'ignore'])
         ->name('discovery-candidates.ignore');
+
+    // Suggested device->site corrections. Reading is open to any operator; approving
+    // applies a real move and is gated inside the controller by canMoveDevices().
+    Route::get('site-proposals', [\App\Http\Controllers\Api\SiteProposalController::class, 'index'])
+        ->name('site-proposals.index');
+    Route::post('site-proposals/{proposal}/approve', [\App\Http\Controllers\Api\SiteProposalController::class, 'approve'])
+        ->name('site-proposals.approve');
+    Route::post('site-proposals/{proposal}/reject', [\App\Http\Controllers\Api\SiteProposalController::class, 'reject'])
+        ->name('site-proposals.reject');
 });

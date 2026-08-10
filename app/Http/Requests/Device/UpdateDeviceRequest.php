@@ -12,7 +12,18 @@ class UpdateDeviceRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user() !== null; // authenticated operators only
+        if ($this->user() === null) {
+            return false;
+        }
+
+        // Moving a device between sites is restricted; every other field is not.
+        // Checked here rather than in the UI because hiding a control is not a
+        // permission - the API is reachable directly.
+        if ($this->exists('site_id') && ! $this->user()->canMoveDevices()) {
+            return false;
+        }
+
+        return true;
     }
 
     public function rules(): array

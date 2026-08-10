@@ -6,6 +6,8 @@ export interface AuthUser {
     name: string;
     email: string;
     is_admin: boolean;
+    /** May move a device to a different site. Separate from is_admin on purpose. */
+    can_move_devices: boolean;
 }
 
 /**

@@ -36,9 +36,24 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
         'password' => 'hashed', // auto-hash on set
         'is_admin' => 'boolean',
+        'can_move_devices' => 'boolean',
     ];
 
     /** Admins can manage operator accounts; normal operators are view-only. */
+    /**
+     * May this operator move a device to a different site?
+     *
+     * Separate from isAdmin() on purpose: site placement drives outage attribution and
+     * the map's backhaul lines, so it is granted to the few people who own placement
+     * rather than to every admin, and withheld from field techs.
+     */
+    public function canMoveDevices(): bool
+    {
+        // NOT `|| is_admin`: this is a separate grant on purpose, so a future admin
+        // does not silently inherit the ability to move devices between sites.
+        return (bool) $this->can_move_devices;
+    }
+
     public function isAdmin(): bool
     {
         return (bool) $this->is_admin;

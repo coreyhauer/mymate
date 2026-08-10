@@ -35,6 +35,16 @@ export function useCurrentUser() {
  * the backend enforces this on every write endpoint (`RestrictWritesToAdmins`); this hook
  * lets the UI hide the write controls so a viewer never sees a button that would 403.
  */
+/**
+ * Whether this operator may move a device between sites. Narrower than useIsAdmin():
+ * placement drives outage attribution and the map's backhaul lines, so it is granted
+ * explicitly. The UI hides the control; the API enforces it.
+ */
+export function useCanMoveDevices(): boolean {
+    const { data: user } = useCurrentUser();
+    return user?.can_move_devices ?? false;
+}
+
 export function useIsAdmin(): boolean {
     const { data: user } = useCurrentUser();
     return user?.is_admin ?? false;
