@@ -27,8 +27,8 @@ class ImportFiberLinksCommand extends Command
         $s = $action->handle($dry);
 
         $this->info(sprintf(
-            '%d adjacencies scanned -> %d created, %d updated. Skipped: %d (endpoint not mapped to a site), %d (both ends same site).',
-            $s['scanned'], $s['created'], $s['updated'], $s['skipped_no_site'], $s['skipped_same_site']
+            '%d adjacencies scanned -> %d created, %d updated. Skipped: %d (endpoint not mapped to a site), %d (both ends same site), %d (radio in an SFP cage).',
+            $s['scanned'], $s['created'], $s['updated'], $s['skipped_no_site'], $s['skipped_same_site'], $s['skipped_wireless']
         ));
 
         if ($dry) {

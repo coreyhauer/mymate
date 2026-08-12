@@ -174,14 +174,41 @@ class LibreNmsMysqlSource implements LibreNmsSource, \App\Services\Rf\LibreNmsRf
      * resolved to a monitored device; unresolved ones carry a hostname string we cannot map to
      * a site with any confidence.
      *
+     * CRITICAL - two filters, and both were learned the hard way:
+     *
+     * 1. The local port must be an SFP/QSFP cage. A wireless bridge is TRANSPARENT to
+     * LLDP, so two routers either end of a radio shot happily report each other as neighbours;
+     * without this filter the import labelled 3,261 adjacencies as "fiber", which is more spans
+     * than the entire wireless mesh has links and was obviously counting radio hops. Fiber
+     * terminates on an SFP, radios land on an ether port, so the cage is the discriminator.
+     * (Caveat both ways: fiber behind a media converter lands on ether and is missed, and a
+     * copper SFP would be counted - so treat the result as strong evidence, not proof.)
+     *
+     * 2. The port must have exactly ONE neighbour. LLDP leaks across shared L2 - the Tennessee
+     * management VLAN made every hub report every other hub, so the first cut produced a full
+     * mesh (13 Hub<->Bucket Branch as a direct span, when the fiber physically runs 13 Hub ->
+     * Spann Loop -> Bucket Branch). A dense graph is worse than no graph: Path would draw a
+     * shorter route than the light actually takes. Real fiber is point-to-point, so a cage with
+     * several neighbours is a shared segment and gets dropped.
+     *
      * Note this returns BOTH directions of each adjacency - de-duplication is the caller's job,
      * because only it knows how the two ends map onto sites.
      *
      * @return list<array{local_ip:string,local_port:string,local_descr:string,remote_ip:string,remote_port:string}>
      */
-    public function fiberAdjacency(): array
+    public function fiberAdjacency(bool $pointToPointOnly = true): array
     {
-        $rows = $this->connection()->select(<<<'SQL'
+        // The p2p restriction is right for IMPORTING LINKS (geometry must be the real span) but
+        // wrong for DERIVING DRAINS: a site that reaches an NNI across a shared segment still
+        // drains there, and applying p2p to both lost 6 real drains.
+        $p2p = $pointToPointOnly ? "AND l.local_port_id IN (
+                     SELECT local_port_id FROM links
+                      WHERE remote_device_id > 0
+                      GROUP BY local_port_id
+                     HAVING COUNT(DISTINCT remote_device_id) = 1
+                   )" : '';
+
+        $rows = $this->connection()->select(<<<SQL
             SELECT ld.hostname AS local_ip,
                    COALESCE(lp.ifName, '')  AS local_port,
                    COALESCE(lp.ifAlias, '') AS local_descr,
@@ -195,6 +222,8 @@ class LibreNmsMysqlSource implements LibreNmsSource, \App\Services\Rf\LibreNmsRf
                AND ld.device_id <> rd.device_id
                AND (ld.hardware REGEXP '^(CRS|CCR|RB[0-9]|EdgeSwitch|US-|RDS)')
                AND (rd.hardware REGEXP '^(CRS|CCR|RB[0-9]|EdgeSwitch|US-|RDS)')
+               AND lp.ifName REGEXP '^(sfp|qsfp)'
+               {$p2p}
             SQL);
 
         return array_map(static fn ($r): array => [

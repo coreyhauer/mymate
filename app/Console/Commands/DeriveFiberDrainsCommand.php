@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Import\LibreNms\LibreNmsMysqlSource;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -31,8 +30,15 @@ class DeriveFiberDrainsCommand extends Command
 
     protected $description = 'Mark sites as fiber drains based on fiber adjacency to an NNI aggregator';
 
-    public function handle(LibreNmsMysqlSource $source): int
+    public function handle(): int
     {
+        if (! config('mymate.librenms_rf.enabled', false)) {
+            $this->error('LibreNMS is not configured (mymate.librenms_rf) - drains are derived from its LLDP data.');
+
+            return self::FAILURE;
+        }
+        $source = \App\Actions\Sites\ImportFiberLinks::sourceFromConfig();
+
         $nnis = collect(config('mymate.fiber_nnis', []))->filter()->values();
         if ($nnis->isEmpty()) {
             $this->error('No NNIs configured (mymate.fiber_nnis) - refusing to derive drains from nothing.');
@@ -44,7 +50,8 @@ class DeriveFiberDrainsCommand extends Command
             ->whereNotNull('mgmt_ip')->whereNotNull('site_id')
             ->pluck('site_id', 'mgmt_ip');
 
-        $adjacency = $source->fiberAdjacency();
+        // false = include shared-segment adjacency; a drain is a drain however it reaches the NNI.
+        $adjacency = $source->fiberAdjacency(false);
 
         $seenNni = [];
         $drainSites = [];
