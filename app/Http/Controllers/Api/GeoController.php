@@ -92,20 +92,73 @@ class GeoController extends Controller
      */
     public function backhauls(): JsonResponse
     {
+        $imbalance = $this->chainImbalanceByDevice();
+
         $rows = DB::table('site_links as l')
             ->join('sites as a', 'a.id', '=', 'l.site_a_id')
             ->join('sites as b', 'b.id', '=', 'l.site_b_id')
             ->whereNotNull('a.latitude')->whereNotNull('b.latitude')
-            ->selectRaw('l.id, l.media_type, a.longitude AS a_lng, a.latitude AS a_lat, b.longitude AS b_lng, b.latitude AS b_lat')
+            ->selectRaw('l.id, l.media_type, l.device_a_id, l.device_b_id, a.longitude AS a_lng, a.latitude AS a_lat, b.longitude AS b_lng, b.latitude AS b_lat')
             ->get()
-            ->map(fn ($r) => [
-                'id' => (int) $r->id,
-                'media_type' => $r->media_type,
-                'a' => [(float) $r->a_lng, (float) $r->a_lat],
-                'b' => [(float) $r->b_lng, (float) $r->b_lat],
-            ]);
+            ->map(function ($r) use ($imbalance) {
+                // Worst end wins: water in ONE pigtail is a fault on the link, and reporting the
+                // healthier end would hide exactly the thing this is meant to surface.
+                $vals = array_filter([
+                    $imbalance[$r->device_a_id] ?? null,
+                    $imbalance[$r->device_b_id] ?? null,
+                ], fn ($v) => $v !== null);
+
+                return [
+                    'id' => (int) $r->id,
+                    'media_type' => $r->media_type,
+                    'a' => [(float) $r->a_lng, (float) $r->a_lat],
+                    'b' => [(float) $r->b_lng, (float) $r->b_lat],
+                    'chain_imbalance_db' => $vals === [] ? null : round(max($vals), 1),
+                ];
+            });
 
         return response()->json(['data' => $rows]);
+    }
+
+    /**
+     * Worst per-antenna-chain RSSI spread per device, from the newest per-chain samples.
+     *
+     * A radio reports each chain separately; healthy ones track within a couple of dB. A single
+     * chain sagging while the other holds is the signature of water in that chain's RPSMA
+     * pigtail - the failure Corey specifically wanted findable, and one that is INVISIBLE in the
+     * device-level average the rest of the RF pipeline stores. Per-chain rows only began landing
+     * 2026-08-12, so a device with none simply returns null (unknown), never 0 (healthy).
+     *
+     * @return array<int, float> device_id => imbalance in dB
+     */
+    private function chainImbalanceByDevice(): array
+    {
+        $staleAfter = (int) config('mymate.librenms_rf.stale_after_minutes', 30);
+
+        $rows = DB::select(<<<'SQL'
+            SELECT s.device_id,
+                   MAX(s.rssi_dbm) - MIN(s.rssi_dbm) AS imbalance_db
+              FROM rf_link_samples s
+              JOIN (
+                    SELECT device_id, sensor_index, MAX(ts) AS ts
+                      FROM rf_link_samples
+                     WHERE sensor_index <> '' AND ts >= ?
+                     GROUP BY device_id, sensor_index
+                   ) newest
+                ON newest.device_id = s.device_id
+               AND newest.sensor_index = s.sensor_index
+               AND newest.ts = s.ts
+             WHERE s.sensor_index <> '' AND s.rssi_dbm IS NOT NULL
+             GROUP BY s.device_id
+            HAVING COUNT(*) > 1
+            SQL, [now()->subMinutes($staleAfter)->toDateTimeString()]);
+
+        $out = [];
+        foreach ($rows as $r) {
+            $out[(int) $r->device_id] = (float) $r->imbalance_db;
+        }
+
+        return $out;
     }
 
     /**

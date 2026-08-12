@@ -194,7 +194,12 @@ function backhaulLines(links: Backhaul[]): LineFeatures {
         features: links.map((l) => ({
             type: 'Feature',
             geometry: { type: 'LineString', coordinates: [l.a, l.b] },
-            properties: { wireless: l.media_type === 'wireless' },
+            properties: {
+                wireless: l.media_type === 'wireless',
+                // -1 (not null) for "no per-chain data": MapLibre filters treat a missing
+                // property as 0, which would paint an unmeasured link as perfectly balanced.
+                imbalance: typeof l.chain_imbalance_db === 'number' ? l.chain_imbalance_db : -1,
+            },
         })),
     };
 }
@@ -326,6 +331,22 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
             map.on('load', () => {
                 // --- Backhauls: real site-to-site topology, drawn under the markers ---
                 map.addSource('backhauls', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+                // Chain-imbalance overlay, drawn UNDER the normal link lines so it reads as a
+                // halo around a bad link rather than replacing the topology. One chain sagging
+                // while the other holds is the RPSMA water-intrusion signature; >=12 dB is
+                // unambiguous, 6-12 dB is worth a look. Links with no per-chain data (-1) are
+                // excluded entirely - unknown must never render as healthy.
+                map.addLayer({
+                    id: 'backhaul-chain-imbalance', type: 'line', source: 'backhauls',
+                    filter: ['>=', ['get', 'imbalance'], 6],
+                    layout: { 'line-cap': 'round' },
+                    paint: {
+                        'line-width': ['interpolate', ['linear'], ['get', 'imbalance'], 6, 4, 20, 9],
+                        'line-opacity': 0.55,
+                        'line-blur': 2,
+                        'line-color': ['step', ['get', 'imbalance'], '#f59e0b', 12, '#ef4444'],
+                    },
+                });
                 map.addLayer({
                     id: 'backhaul-solid', type: 'line', source: 'backhauls', filter: ['!=', ['get', 'wireless'], true],
                     layout: { 'line-cap': 'round' }, paint: { 'line-color': '#5b8def', 'line-width': 1.5, 'line-opacity': 0.6 },

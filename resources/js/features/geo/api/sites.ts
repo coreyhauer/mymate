@@ -63,6 +63,11 @@ export function useGeoDevices() {
 
 /** A site-to-site backhaul link as coordinate pairs (from the OSS backbone topology). */
 export interface Backhaul {
+    /**
+     * Worst per-antenna-chain RSSI spread across the link's two radios, in dB. null = no
+     * per-chain data for either end (unknown), which must NOT be drawn as healthy.
+     */
+    chain_imbalance_db?: number | null;
     id: number;
     media_type: string | null;
     a: [number, number]; // [lng, lat]
