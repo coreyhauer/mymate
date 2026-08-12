@@ -248,6 +248,7 @@ class PullLibreNmsRfMetrics
         $sampleRows = [];
         $rejections = [];
 
+        $chainRows = [];
         foreach ($candidates as $deviceId => $byClass) {
             $sampleRows[] = $this->buildRow(
                 $deviceId,
@@ -258,12 +259,18 @@ class PullLibreNmsRfMetrics
                 $ts,
                 $rejections,
             );
+
+            foreach ($this->buildChainRows($deviceId, $signalCandidates[$deviceId] ?? [], $ts, $rejections) as $cr) {
+                $chainRows[] = $cr;
+            }
         }
         // A device can have signal candidates but nothing in $candidates only if it had zero
         // eligible sensor rows at all, which can't happen (signalCandidates is a subset of
         // candidates' rows) - no extra pass needed here.
 
-        $samplesWritten = $this->writeSamples($sampleRows);
+        // Chain rows go to HISTORY ONLY. rf_link_state is keyed one-row-per-device, so writing
+        // them there would have the chains fight each other for the same primary key.
+        $samplesWritten = $this->writeSamples(array_merge($sampleRows, $chainRows));
         $stateWritten = $this->writeState($sampleRows);
 
         if ($maxSourceLastUpdate !== null) {
@@ -418,6 +425,64 @@ class PullLibreNmsRfMetrics
      * @param  array<string, int>  $rejections
      * @return array<string, mixed>
      */
+    /**
+     * PER-ANTENNA-CHAIN RSSI rows, in addition to the collapsed device row.
+     *
+     * WHY: chain imbalance is the signature of water in an RPSMA pigtail - one chain degrades
+     * while the other holds, which is invisible in a device-level average and is exactly the
+     * failure Corey asked to be able to find. The collapsed row exists because rssi and noise
+     * floor use DIFFERENT sensor_index values on airOS, so grouping by index kills SNR
+     * derivation fleet-wide (see class docblock); that reasoning applies to SNR, not to RSSI,
+     * so the chains can be kept alongside it rather than instead of it.
+     *
+     * These rows carry ONLY rssi_dbm - deriving SNR per chain would need a matching per-chain
+     * noise floor, which airOS does not index compatibly. `sensor_index` is the chain's own
+     * descr ("Chain 1"), which is what makes them distinguishable from the device row's ''.
+     *
+     * Only genuinely per-chain readings qualify: a descr like "Overall RSSI" is the device-level
+     * figure again and would double-count, and single-chain radios produce nothing here.
+     *
+     * @param  array<string, list<array{descr:?string, value:float, type:?string}>>  $signalMetrics
+     * @return list<array<string, mixed>>
+     */
+    private function buildChainRows(int $deviceId, array $signalMetrics, Carbon $ts, array &$rejections): array
+    {
+        $rows = [];
+
+        foreach ($signalMetrics['signal'] ?? [] as $reading) {
+            $descr = trim((string) ($reading['descr'] ?? ''));
+            if ($descr === '' || preg_match('/\bchain\s*\d+/i', $descr) !== 1) {
+                continue; // device-level ("Overall RSSI") or unlabelled - already in the main row
+            }
+
+            $rssi = $this->guard($reading['value'] ?? null, self::SIGNAL_MIN_DBM, self::SIGNAL_MAX_DBM, 'signal_chain', $rejections);
+            if ($rssi === null) {
+                continue;
+            }
+
+            $rows[] = [
+                'device_id' => $deviceId,
+                'ts' => $ts,
+                'sensor_index' => mb_substr($descr, 0, 64),
+                'rssi_dbm' => $rssi,
+                'rssi_sensor_type' => $reading['type'] ?? null,
+                'noise_floor_dbm' => null,
+                'snr_db' => null,
+                'snr_source' => null,
+                'rate_mbps' => null,
+                'channel_util_pct' => null,
+                'tx_power_dbm' => null,
+                'distance_mi' => null,
+                'freq_mhz' => null,
+                'if_errors_in' => null,
+                'if_errors_out' => null,
+                'source_lastupdate' => null,
+            ];
+        }
+
+        return $rows;
+    }
+
     private function buildRow(int $deviceId, array $byClass, array $signalMetrics, ?string $sourceLastupdate, ?array $errors, Carbon $ts, array &$rejections): array
     {
         $signalPick = $this->pickSignalReading($signalMetrics['signal'] ?? []);

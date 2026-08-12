@@ -64,8 +64,8 @@ class ImportFiberLinks
                 $stats['skipped_wireless']++;
                 continue;
             }
-            $aSite = $ipToSite[$r['local_ip']] ?? null;
-            $bSite = $ipToSite[$r['remote_ip']] ?? null;
+            $aSite = $ipToSite[$r['local_ip']] ?? ($r['local_ip2'] !== '' ? ($ipToSite[$r['local_ip2']] ?? null) : null);
+            $bSite = $ipToSite[$r['remote_ip']] ?? ($r['remote_ip2'] !== '' ? ($ipToSite[$r['remote_ip2']] ?? null) : null);
 
             if ($aSite === null || $bSite === null) {
                 $stats['skipped_no_site']++;

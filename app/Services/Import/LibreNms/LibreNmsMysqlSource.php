@@ -198,6 +198,14 @@ class LibreNmsMysqlSource implements LibreNmsSource, \App\Services\Rf\LibreNmsRf
      */
     public function fiberAdjacency(bool $pointToPointOnly = true): array
     {
+        // The SFP restriction goes with the p2p one, and for the same reason: both exist to make
+        // LINK GEOMETRY accurate. For DRAIN DETECTION they are actively harmful - carrier
+        // transport frequently lands on a VLAN sub-interface rather than a raw cage
+        // ('vlan1269-metronet-transport' on leroy fiber, which is how Leroy, Mankato, KQCL and
+        // Anderson14 all reach Southfront), and requiring '^sfp' silently denied those sites
+        // their drain flag.
+        $portFilter = $pointToPointOnly ? "AND lp.ifName REGEXP '^(sfp|qsfp)'" : '';
+
         // The p2p restriction is right for IMPORTING LINKS (geometry must be the real span) but
         // wrong for DERIVING DRAINS: a site that reaches an NNI across a shared segment still
         // drains there, and applying p2p to both lost 6 real drains.
@@ -210,6 +218,10 @@ class LibreNmsMysqlSource implements LibreNmsSource, \App\Services\Rf\LibreNmsRf
 
         $rows = $this->connection()->select(<<<SQL
             SELECT ld.hostname AS local_ip,
+                   COALESCE(INET6_NTOA(ld.ip), '') AS local_ip2,
+                   COALESCE(INET6_NTOA(rd.ip), '') AS remote_ip2,
+                   COALESCE(ld.sysName, '') AS local_name,
+                   COALESCE(rd.sysName, '') AS remote_name,
                    COALESCE(lp.ifName, '')  AS local_port,
                    COALESCE(lp.ifAlias, '') AS local_descr,
                    rd.hostname AS remote_ip,
@@ -222,15 +234,28 @@ class LibreNmsMysqlSource implements LibreNmsSource, \App\Services\Rf\LibreNmsRf
                AND ld.device_id <> rd.device_id
                AND (ld.hardware REGEXP '^(CRS|CCR|RB[0-9]|EdgeSwitch|US-|RDS)')
                AND (rd.hardware REGEXP '^(CRS|CCR|RB[0-9]|EdgeSwitch|US-|RDS)')
-               AND lp.ifName REGEXP '^(sfp|qsfp)'
+               {$portFilter}
                {$p2p}
             SQL);
 
         return array_map(static fn ($r): array => [
             'local_ip' => (string) $r->local_ip,
+            // LibreNMS keys devices by `hostname`, but a router often answers on a DIFFERENT
+            // address in My Mate (windom fiber is 204.16.59.44 here and 10.88.0.17 there;
+            // dahl pppoe is 10.132.3.27 vs its BGP loopback 10.104.3.41). Matching on hostname
+            // alone silently dropped those - Windom lost its fiber-drain flag entirely and the
+            // Path button told an operator "8 hops to Erdahl" for a site that IS a drain.
+            // `ip` is VARBINARY in LibreNMS, hence INET6_NTOA.
+            'local_ip2' => (string) $r->local_ip2,
+            // Last-resort key. Some routers share NO address between the two systems at all
+            // (windom fiber is 204.16.59.44 in LibreNMS, 10.88.0.17 in My Mate), so the device
+            // NAME is the only thing that joins them.
+            'local_name' => (string) $r->local_name,
+            'remote_name' => (string) $r->remote_name,
             'local_port' => (string) $r->local_port,
             'local_descr' => (string) $r->local_descr,
             'remote_ip' => (string) $r->remote_ip,
+            'remote_ip2' => (string) $r->remote_ip2,
             'remote_port' => (string) $r->remote_port,
         ], $rows);
     }

@@ -26,12 +26,19 @@ use Illuminate\Support\Facades\DB;
  */
 class DeriveFiberDrainsCommand extends Command
 {
-    protected $signature = 'sites:derive-fiber-drains {--dry-run : Report what would change without writing}';
+    protected $signature = 'sites:derive-fiber-drains
+        {--dry-run : Report what would change without writing}
+        {--mark= : Mark this site id as a MANUAL drain (never overwritten by derivation)}
+        {--unmark= : Remove a manual drain flag from this site id}';
 
     protected $description = 'Mark sites as fiber drains based on fiber adjacency to an NNI aggregator';
 
     public function handle(): int
     {
+        if ($this->option('mark') !== null || $this->option('unmark') !== null) {
+            return $this->setManual();
+        }
+
         if (! config('mymate.librenms_rf.enabled', false)) {
             $this->error('LibreNMS is not configured (mymate.librenms_rf) - drains are derived from its LLDP data.');
 
@@ -50,22 +57,35 @@ class DeriveFiberDrainsCommand extends Command
             ->whereNotNull('mgmt_ip')->whereNotNull('site_id')
             ->pluck('site_id', 'mgmt_ip');
 
+        // Name fallback for routers the two systems address differently (see fiberAdjacency).
+        $nameToSite = [];
+        foreach (DB::table('devices')->whereNotNull('site_id')->select('name', 'site_id')->get() as $d) {
+            $nameToSite[mb_strtolower(trim($d->name))] = $d->site_id;
+        }
+
         // false = include shared-segment adjacency; a drain is a drain however it reaches the NNI.
         $adjacency = $source->fiberAdjacency(false);
 
         $seenNni = [];
         $drainSites = [];
         foreach ($adjacency as $r) {
-            foreach ([[$r['local_ip'], $r['remote_ip']], [$r['remote_ip'], $r['local_ip']]] as [$near, $far]) {
+            foreach ([
+                [$r['local_ip'], $r['remote_ip'], $r['local_ip2'], $r['local_name']],
+                [$r['remote_ip'], $r['local_ip'], $r['remote_ip2'], $r['remote_name']],
+            ] as [$near, $far, $nearAlt, $nearName]) {
                 if (! $nnis->contains($far)) {
                     continue;
                 }
                 $seenNni[$far] = true;
                 // The NNI's own site is a drain too - Southfront both aggregates and drains.
-                foreach ([$near, $far] as $ip) {
-                    if (isset($ipToSite[$ip])) {
+                foreach ([$near, $far, $nearAlt] as $ip) {
+                    if ($ip !== '' && isset($ipToSite[$ip])) {
                         $drainSites[(int) $ipToSite[$ip]] = true;
                     }
+                }
+                $key = mb_strtolower(trim($nearName));
+                if ($key !== '' && isset($nameToSite[$key])) {
+                    $drainSites[(int) $nameToSite[$key]] = true;
                 }
             }
         }
@@ -77,7 +97,19 @@ class DeriveFiberDrainsCommand extends Command
         }
 
         $ids = array_keys($drainSites);
-        $current = DB::table('sites')->where('is_fiber_drain', true)->pluck('name', 'id');
+
+        // Hand-set drains are never touched: some are invisible to the derivation (Mankato's
+        // carrier handoff exposes no LLDP adjacency to an NNI), and silently clearing an
+        // operator's flag overnight would be worse than not deriving at all.
+        $manual = DB::table('sites')->where('fiber_drain_source', 'manual')->pluck('name', 'id');
+        if ($manual->isNotEmpty()) {
+            $this->line(sprintf('  (%d manual drain%s preserved: %s)',
+                $manual->count(), $manual->count() === 1 ? '' : 's', $manual->values()->implode(', ')));
+        }
+
+        $current = DB::table('sites')->where('is_fiber_drain', true)
+            ->where(fn ($q) => $q->where('fiber_drain_source', '!=', 'manual')->orWhereNull('fiber_drain_source'))
+            ->pluck('name', 'id');
         $adding = array_diff($ids, $current->keys()->all());
         $removing = array_diff($current->keys()->all(), $ids);
 
@@ -98,13 +130,43 @@ class DeriveFiberDrainsCommand extends Command
         }
 
         DB::transaction(function () use ($ids) {
-            DB::table('sites')->where('is_fiber_drain', true)->update(['is_fiber_drain' => false]);
+            DB::table('sites')
+                ->where('is_fiber_drain', true)
+                ->where(fn ($q) => $q->where('fiber_drain_source', '!=', 'manual')->orWhereNull('fiber_drain_source'))
+                ->update(['is_fiber_drain' => false, 'fiber_drain_source' => null]);
+
             if ($ids !== []) {
-                DB::table('sites')->whereIn('id', $ids)->update(['is_fiber_drain' => true]);
+                DB::table('sites')->whereIn('id', $ids)
+                    ->where(fn ($q) => $q->where('fiber_drain_source', '!=', 'manual')->orWhereNull('fiber_drain_source'))
+                    ->update(['is_fiber_drain' => true, 'fiber_drain_source' => 'derived']);
             }
         });
 
         $this->info('Written.');
+
+        return self::SUCCESS;
+    }
+
+    /** Hand-set (or clear) a drain the derivation cannot see. */
+    private function setManual(): int
+    {
+        $mark = $this->option('mark');
+        $id = (int) ($mark ?? $this->option('unmark'));
+        $site = DB::table('sites')->where('id', $id)->first();
+
+        if (! $site) {
+            $this->error("No site #{$id}.");
+
+            return self::FAILURE;
+        }
+
+        if ($mark !== null) {
+            DB::table('sites')->where('id', $id)->update(['is_fiber_drain' => true, 'fiber_drain_source' => 'manual']);
+            $this->info("{$site->name} (#{$id}) marked as a MANUAL fiber drain - derivation will not clear it.");
+        } else {
+            DB::table('sites')->where('id', $id)->update(['is_fiber_drain' => false, 'fiber_drain_source' => null]);
+            $this->info("{$site->name} (#{$id}) manual drain flag removed.");
+        }
 
         return self::SUCCESS;
     }
