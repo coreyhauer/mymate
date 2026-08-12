@@ -34,6 +34,10 @@ type ShellState = {
     // One-shot "fly the geo map to this device" request (outage row's Geo button). The geo
     // map consumes and clears it once the flight starts; NOT persisted.
     geoFocusDeviceId: number | null;
+    // The site whose backhaul path to the fiber drain is highlighted on the geo map (Path
+    // button). Null = no path drawn. NOT persisted - a highlighted chain is a moment of
+    // triage, not a mode you should come back to a day later still in.
+    pathSiteId: number | null;
     activeMapId: number | null;
     // Kept as flat primitive records (not a nested object per id) so each getSnapshot
     // returns a stable scalar - a fresh object per render would loop useSyncExternalStore.
@@ -122,6 +126,7 @@ let state: ShellState = {
     selectedDeviceId: saved.selectedDeviceId ?? null,
     selectedSiteId: null,
     geoFocusDeviceId: null,
+    pathSiteId: null,
     activeMapId: saved.activeMapId ?? null,
     chartModeById: saved.chartModeById ?? {},
     ifaceFilterById: saved.ifaceFilterById ?? {},
@@ -211,6 +216,19 @@ export function clearGeoFocus(): void {
 
 export function useGeoFocusDeviceId(): number | null {
     return useSyncExternalStore(subscribe, () => state.geoFocusDeviceId);
+}
+
+/**
+ * Highlight the backhaul path from this site back to its fiber drain. Toggles: asking for the
+ * site already showing clears it, so the same button turns the overlay off.
+ */
+export function showPathFor(siteId: number | null): void {
+    state = { ...state, pathSiteId: state.pathSiteId === siteId ? null : siteId };
+    emit();
+}
+
+export function usePathSiteId(): number | null {
+    return useSyncExternalStore(subscribe, () => state.pathSiteId);
 }
 
 /** Select a site for the geo inspector. Mirror of {@link selectDevice} - opening one closes the other. */

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import maplibregl from 'maplibre-gl/dist/maplibre-gl-csp';
-import { CaretRight, Users, ArrowsLeftRight } from '@phosphor-icons/react';
+import { CaretRight, Users, ArrowsLeftRight, Path as PathIcon } from '@phosphor-icons/react';
 import { useCanMoveDevices } from '../../auth/api/auth';
 import { MoveDeviceDialog } from './MoveDeviceDialog';
 import { StatusDot } from '../../../components/StatusDot';
@@ -10,8 +10,8 @@ import { SonarTicketsSection } from '../../annotations/components/SonarTicketsSe
 import { useNotes } from '../../annotations/api/notes';
 import { useSonarTickets } from '../../annotations/api/sonarTickets';
 import type { AnnotationSubject } from '../../annotations/types';
-import { selectDevice, setInspectorOpen } from '../../../lib/shellStore';
-import { useGeoDevices, type GeoDevice, type Site } from '../api/sites';
+import { selectDevice, setInspectorOpen, showPathFor, usePathSiteId } from '../../../lib/shellStore';
+import { useGeoDevices, useBackhaulPath, type GeoDevice, type Site } from '../api/sites';
 
 /**
  * The device list for a clicked site, as a MapLibre popup ANCHORED OVER ITS TOWER.
@@ -165,6 +165,55 @@ function Collapsible({
 }
 
 /**
+ * "Path" - highlight this site's backhaul chain back to the fiber drain that feeds it.
+ *
+ * The question during an outage is rarely "is this tower down" but "what else is behind the
+ * same break", and a typical tower here is NINE wireless hops from fiber. Pressing this draws
+ * the chain on the map and states where it lands.
+ *
+ * It deliberately reports WHY there is no path rather than just going quiet: a site with no
+ * links at all is a data gap to fix, whereas no reachable drain means that region's fiber
+ * hasn't been imported yet. Those need different actions, so they must not look identical.
+ */
+function PathControl({ siteId }: { siteId: number }) {
+    const active = usePathSiteId() === siteId;
+    const { data, isFetching } = useBackhaulPath(active ? siteId : null);
+    const path = data?.data ?? null;
+
+    const detail = !active
+        ? null
+        : isFetching && !data
+          ? 'Tracing...'
+          : path
+            ? path.hops === 0
+                ? 'This site is the fiber drain.'
+                : `${path.hops} hop${path.hops === 1 ? '' : 's'} to ${path.drain?.name ?? 'fiber'}`
+            : data?.reason === 'site_has_no_links'
+              ? 'No backhaul links recorded for this site.'
+              : 'No fiber drain reachable - the fiber for this region may not be imported yet.';
+
+    return (
+        <div className="mt-1">
+            <button
+                type="button"
+                onClick={() => showPathFor(siteId)}
+                aria-pressed={active}
+                className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium ring-1 transition-colors duration-200 ease-fluid ${
+                    active
+                        ? 'bg-amber-400/15 text-amber-200 ring-amber-300/30'
+                        : 'bg-white/[0.04] text-white/70 ring-white/10 hover:bg-white/[0.08] hover:text-white'
+                }`}
+                title="Highlight the backhaul path from here to the fiber drain"
+            >
+                <PathIcon weight="bold" className="h-3 w-3" />
+                Path
+            </button>
+            {detail && <p className="mt-1 text-[11px] text-white/50">{detail}</p>}
+        </div>
+    );
+}
+
+/**
  * The popup body. Devices come from the map's own compact feed (/geo/devices), so opening a site
  * costs no extra request and the list re-renders as statuses change under it.
  */
@@ -227,6 +276,7 @@ function SitePopupBody({ site, onClose }: { site: Site; onClose: () => void }) {
                         )}
                     </p>
                 )}
+                <PathControl siteId={site.id} />
             </div>
 
             <div className="-mr-1.5 min-h-0 flex-1 overflow-y-auto pr-1.5">

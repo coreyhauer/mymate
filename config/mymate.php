@@ -164,6 +164,21 @@ return [
         'stale_after_minutes' => (int) env('MYMATE_LIBRENMS_RF_STALE_MINUTES', 30),
     ],
 
+    // The NNI aggregation routers - where our fiber hands off to transit. A site with fiber
+    // adjacency to one of these is a "fiber drain": the point where a wireless backhaul chain
+    // stops being wireless (sites:derive-fiber-drains, and the terminator for the Path walk).
+    //
+    // These are management IPs as LibreNMS knows them. Adding one widens the derived drain set;
+    // MISSING one silently leaves every site behind it with no drain and no Path, so the
+    // command warns when a configured NNI has no adjacency rather than carrying on quietly.
+    'fiber_nnis' => array_values(array_filter(array_map('trim', explode(',', (string) env(
+        'MYMATE_FIBER_NNIS',
+        // Southfront 2216 (MN core), Waterloo 2216 (IA), Nashville 2216 (365 Datacenter,
+        // downtown Nashville - TN handoff to Hurricane Electric), Chicago CH3 (Equinix CH3,
+        // QuickPacket colo - Farina + Bluff circuits).
+        '204.209.51.43,10.100.2.147,64.7.234.67,192.73.53.241'
+    ))))),
+
     // Sonar ticket links (My Mate only ever READS Sonar's GraphQL ticketing API - it never
     // creates/updates/closes tickets there). `enabled` derives from a non-empty token so the
     // feature silently no-ops (empty ticket panel, scheduled refresh command skips) on an

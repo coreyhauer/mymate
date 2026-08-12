@@ -196,4 +196,40 @@ class GeoController extends Controller
             return response()->json(['data' => null]);
         }
     }
+
+    /**
+     * The backhaul path from a site (or a device's site) back to its fiber drain, for the
+     * map's Path button.
+     *
+     * `data: null` is a real answer, not an error - a site can genuinely have no traceable
+     * path (no links at all, or no drain reachable because its region's fiber has not been
+     * imported). `reason` says which, because "we don't know" and "there is no path" mean very
+     * different things to someone staring at an outage.
+     */
+    public function path(Request $request, \App\Actions\Sites\ResolveBackhaulPath $resolver): JsonResponse
+    {
+        $siteId = (int) $request->integer('site_id');
+
+        if ($siteId <= 0 && $request->filled('device_id')) {
+            $siteId = (int) DB::table('devices')->where('id', $request->integer('device_id'))->value('site_id');
+        }
+
+        if ($siteId <= 0) {
+            return response()->json(['data' => null, 'reason' => 'no_site'], 422);
+        }
+
+        $path = $resolver->handle($siteId);
+
+        if ($path === null) {
+            $linked = DB::table('site_links')
+                ->where('site_a_id', $siteId)->orWhere('site_b_id', $siteId)->exists();
+
+            return response()->json([
+                'data' => null,
+                'reason' => $linked ? 'no_drain_reachable' : 'site_has_no_links',
+            ]);
+        }
+
+        return response()->json(['data' => $path]);
+    }
 }

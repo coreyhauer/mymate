@@ -7,9 +7,9 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl/dist/maplibre-gl-csp';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
-import { useBackhauls, useGeoDevices, useGeoTickets, useSites, type Backhaul, type GeoDevice, type GeoTicketSite, type Site } from '../api/sites';
+import { useBackhauls, useBackhaulPath, useGeoDevices, useGeoTickets, useSites, type Backhaul, type GeoDevice, type GeoTicketSite, type Site } from '../api/sites';
 import { useMapChannel } from '../../topology/hooks/useMapChannel';
-import { clearGeoFocus, selectDevice, setInspectorOpen, useGeoFocusDeviceId } from '../../../lib/shellStore';
+import { clearGeoFocus, selectDevice, setInspectorOpen, useGeoFocusDeviceId, usePathSiteId } from '../../../lib/shellStore';
 import { GeoSearch, type GeoHit } from './GeoSearch';
 import { SitePopup } from './SitePopup';
 
@@ -199,6 +199,26 @@ function backhaulLines(links: Backhaul[]): LineFeatures {
     };
 }
 
+/**
+ * The highlighted backhaul path (tower -> fiber drain) as ONE line through every hop.
+ *
+ * Drawn as a single LineString rather than per-hop segments so the eye follows one continuous
+ * chain - that is the whole point of the overlay. Sites missing coordinates are dropped rather
+ * than defaulted to 0,0, which would fling the line into the Atlantic.
+ */
+function pathLine(sites: { lat: number | null; lng: number | null }[]): LineFeatures {
+    const coords = sites
+        .filter((s): s is { lat: number; lng: number } => s.lat !== null && s.lng !== null)
+        .map((s) => [s.lng, s.lat] as [number, number]);
+
+    if (coords.length < 2) return { type: 'FeatureCollection', features: [] };
+
+    return {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }],
+    };
+}
+
 /** Individual devices (shown only when drilled in past DEVICE_ZOOM). */
 function devicePoints(devices: GeoDevice[]): PointFeatures {
     return {
@@ -215,6 +235,11 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
     const { data: devices } = useGeoDevices();
     const { data: sites } = useSites();
     const { data: backhauls } = useBackhauls();
+    // Which site's backhaul path is highlighted (SitePopup's Path button). The query is shared
+    // with the popup's own hook via the query key, so toggling costs exactly one request.
+    const pathSiteId = usePathSiteId();
+    const { data: pathResponse } = useBackhaulPath(pathSiteId);
+    const pathData = pathResponse?.data ?? null;
     useMapChannel(); // keep the device cache fresh for the top-bar counts on this page
 
     const containerRef = useRef<HTMLDivElement>(null);
@@ -521,6 +546,49 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
         }
         clearGeoFocus();
     }, [geoFocusId, ready, devices, sites]);
+
+    // Backhaul-path overlay: the chain from a chosen tower back to its fiber drain, drawn as one
+    // amber line ON TOP of the normal backhauls. Added and removed whole with the Path toggle so
+    // the default map carries no extra layers - same lifecycle as weather and tickets.
+    //
+    // Amber deliberately: down is red and tickets are purple, and a path is neither a fault nor a
+    // ticket - it must read as "this is the route", not as another alarm state.
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!map || !ready || !pathData?.sites?.length) return;
+
+        map.addSource('backhaul-path', { type: 'geojson', data: pathLine(pathData.sites) });
+        map.addLayer({
+            id: 'backhaul-path-glow', type: 'line', source: 'backhaul-path',
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#f59e0b', 'line-width': 7, 'line-opacity': 0.22, 'line-blur': 3 },
+        });
+        map.addLayer({
+            id: 'backhaul-path-line', type: 'line', source: 'backhaul-path',
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#fbbf24', 'line-width': 2.5, 'line-opacity': 0.95 },
+        });
+
+        // Frame the whole chain, so a 20-hop path isn't half off-screen. Padded generously on the
+        // right where the inspector rail sits.
+        const coords = pathData.sites
+            .filter((p) => p.lat !== null && p.lng !== null)
+            .map((p) => [p.lng as number, p.lat as number] as [number, number]);
+        if (coords.length >= 2) {
+            const b = coords.reduce(
+                (acc, c) => acc.extend(c),
+                new maplibregl.LngLatBounds(coords[0], coords[0]),
+            );
+            map.fitBounds(b, { padding: { top: 80, bottom: 80, left: 80, right: 380 }, duration: 700, maxZoom: 12 });
+        }
+
+        return () => {
+            for (const id of ['backhaul-path-line', 'backhaul-path-glow']) {
+                if (map.getLayer(id)) map.removeLayer(id);
+            }
+            if (map.getSource('backhaul-path')) map.removeSource('backhaul-path');
+        };
+    }, [ready, pathData]);
 
     // Sonar-ticket layer: bright-purple ticket stubs on every site with an open ticket, at all
     // zooms (the point is spotting them from the wide view). Hover shows the tickets; click

@@ -70,6 +70,9 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
     Route::get('geo/backhauls', [\App\Http\Controllers\Api\GeoController::class, 'backhauls'])->name('geo.backhauls');
     // Open Sonar tickets per placed site, for the map's toggleable ticket layer.
     Route::get('geo/tickets', [\App\Http\Controllers\Api\GeoController::class, 'tickets'])->name('geo.tickets');
+    // Backhaul path from a tower back to its fiber drain (?site_id= or ?device_id=), for the
+    // map's Path button. Answers "what else is behind the same break".
+    Route::get('geo/path', [\App\Http\Controllers\Api\GeoController::class, 'path'])->name('geo.path');
     // The raw site_links registry incl. the resolved-endpoint overlay (ids + provenance) -
     // for external consumers and inspectors; geo/backhauls stays the map's coordinate feed.
     Route::get('site-links', [\App\Http\Controllers\Api\SiteLinkController::class, 'index'])->name('site-links.index');

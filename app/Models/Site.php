@@ -21,11 +21,12 @@ class Site extends Model
     use HasFactory;
 
     protected $fillable = [
-        'name', 'kind', 'latitude', 'longitude', 'address', 'external_ref', 'note',
+        'name', 'kind', 'is_fiber_drain', 'latitude', 'longitude', 'address', 'external_ref', 'note',
     ];
 
     protected $casts = [
         'kind' => SiteKind::class,
+        'is_fiber_drain' => 'boolean',
         'latitude' => 'float',
         'longitude' => 'float',
     ];

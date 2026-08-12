@@ -163,4 +163,46 @@ class LibreNmsMysqlSource implements LibreNmsSource, \App\Services\Rf\LibreNmsRf
             'if_errors_out' => isset($r->if_errors_out) ? (int) $r->if_errors_out : null,
         ], $rows);
     }
+
+    /**
+     * LLDP/CDP adjacency between wired infrastructure, for App\Actions\Sites\ImportFiberLinks.
+     *
+     * Restricted to switch/router hardware on BOTH ends (CRS/CCR/RB/EdgeSwitch/US-/RDS) so we
+     * get backbone adjacency rather than the whole neighbour table - a tower's sector radios
+     * all LLDP to their own sector switch and would otherwise flood the result with links that
+     * never leave the site. `remote_device_id > 0` keeps only neighbours LibreNMS has actually
+     * resolved to a monitored device; unresolved ones carry a hostname string we cannot map to
+     * a site with any confidence.
+     *
+     * Note this returns BOTH directions of each adjacency - de-duplication is the caller's job,
+     * because only it knows how the two ends map onto sites.
+     *
+     * @return list<array{local_ip:string,local_port:string,local_descr:string,remote_ip:string,remote_port:string}>
+     */
+    public function fiberAdjacency(): array
+    {
+        $rows = $this->connection()->select(<<<'SQL'
+            SELECT ld.hostname AS local_ip,
+                   COALESCE(lp.ifName, '')  AS local_port,
+                   COALESCE(lp.ifAlias, '') AS local_descr,
+                   rd.hostname AS remote_ip,
+                   COALESCE(l.remote_port, '') AS remote_port
+              FROM links l
+              JOIN devices ld ON ld.device_id = l.local_device_id
+              JOIN devices rd ON rd.device_id = l.remote_device_id
+              LEFT JOIN ports lp ON lp.port_id = l.local_port_id
+             WHERE l.remote_device_id > 0
+               AND ld.device_id <> rd.device_id
+               AND (ld.hardware REGEXP '^(CRS|CCR|RB[0-9]|EdgeSwitch|US-|RDS)')
+               AND (rd.hardware REGEXP '^(CRS|CCR|RB[0-9]|EdgeSwitch|US-|RDS)')
+            SQL);
+
+        return array_map(static fn ($r): array => [
+            'local_ip' => (string) $r->local_ip,
+            'local_port' => (string) $r->local_port,
+            'local_descr' => (string) $r->local_descr,
+            'remote_ip' => (string) $r->remote_ip,
+            'remote_port' => (string) $r->remote_port,
+        ], $rows);
+    }
 }

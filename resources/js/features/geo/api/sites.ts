@@ -145,3 +145,50 @@ export function useSite(id: number | null) {
         enabled: id !== null,
     });
 }
+
+/**
+ * The backhaul path from a site back to the fiber drain that feeds it (/geo/path).
+ *
+ * `data: null` with a `reason` is a legitimate answer - a site can have no links at all, or no
+ * drain reachable because its region's fiber has not been imported yet. The UI must say which
+ * rather than silently drawing nothing, because "we can't tell" and "there is no path" mean
+ * very different things mid-outage.
+ */
+export interface BackhaulPathSite {
+    id: number;
+    name: string;
+    lat: number | null;
+    lng: number | null;
+    is_drain: boolean;
+}
+
+export interface BackhaulPathLink {
+    id: number;
+    media_type: string | null;
+    device_a: string | null;
+    device_b: string | null;
+}
+
+export interface BackhaulPath {
+    sites: BackhaulPathSite[];
+    links: BackhaulPathLink[];
+    hops: number;
+    drain: { id: number; name: string } | null;
+    truncated: boolean;
+}
+
+export type PathReason = 'no_site' | 'no_drain_reachable' | 'site_has_no_links';
+
+export function useBackhaulPath(siteId: number | null) {
+    return useQuery({
+        queryKey: ['geo', 'path', siteId],
+        enabled: siteId !== null,
+        staleTime: 60_000,
+        queryFn: async () => {
+            const { data } = await apiClient.get<{ data: BackhaulPath | null; reason?: PathReason }>(
+                `/geo/path?site_id=${siteId}`,
+            );
+            return data;
+        },
+    });
+}
