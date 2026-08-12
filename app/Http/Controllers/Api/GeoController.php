@@ -152,30 +152,36 @@ class GeoController extends Controller
     {
         $staleAfter = (int) config('mymate.librenms_rf.stale_after_minutes', 30);
 
+        // MEDIAN over a window, not the newest sample. Comparing one instantaneous reading
+        // against a smoothed baseline made every naturally volatile link a false positive:
+        // Justin Hansen <-> Conger swings 0.8-5.4 dB all season (vegetation/Fresnel, not a
+        // fault) and got flagged at +5.7 purely because the poll landed on a peak. A real
+        // mechanical failure holds its new value, so a median over hours keeps it while
+        // discarding the swing.
         $rows = DB::select(<<<'SQL'
-            SELECT s.device_id,
-                   MAX(s.rssi_dbm) - MIN(s.rssi_dbm) AS imbalance_db,
-                   MAX(st.chain_imbalance_baseline_db) AS baseline_db
-              FROM rf_link_samples s
-              LEFT JOIN rf_link_state st ON st.device_id = s.device_id
-              JOIN (
-                    SELECT device_id, sensor_index, MAX(ts) AS ts
-                      FROM rf_link_samples
-                     WHERE sensor_index <> '' AND ts >= ?
-                     GROUP BY device_id, sensor_index
-                   ) newest
-                ON newest.device_id = s.device_id
-               AND newest.sensor_index = s.sensor_index
-               AND newest.ts = s.ts
-             WHERE s.sensor_index <> ''
-               AND s.rssi_dbm IS NOT NULL
-               AND s.source_lastupdate IS NOT NULL
-               AND s.source_lastupdate >= ?
-             GROUP BY s.device_id
-            HAVING COUNT(*) > 1
+            WITH per_ts AS (
+                SELECT s.device_id, s.ts,
+                       MAX(s.rssi_dbm) - MIN(s.rssi_dbm) AS imb
+                  FROM rf_link_samples s
+                 WHERE s.sensor_index <> ''
+                   AND s.rssi_dbm IS NOT NULL
+                   AND s.ts >= ?
+                   AND s.source_lastupdate IS NOT NULL
+                   AND s.source_lastupdate >= ?
+                 GROUP BY s.device_id, s.ts
+                HAVING COUNT(*) > 1
+            )
+            SELECT p.device_id,
+                   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p.imb) AS imbalance_db,
+                   MAX(st.chain_imbalance_baseline_db) AS baseline_db,
+                   COUNT(*) AS samples
+              FROM per_ts p
+              LEFT JOIN rf_link_state st ON st.device_id = p.device_id
+             GROUP BY p.device_id
+            HAVING COUNT(*) >= 3
             SQL, [
-            now()->subMinutes($staleAfter)->toDateTimeString(),
-            now()->subMinutes($staleAfter)->toDateTimeString(),
+            now()->subHours(6)->toDateTimeString(),          // window to smooth over
+            now()->subMinutes($staleAfter)->toDateTimeString(), // and it must still be fresh
         ]);
 
         $out = [];
