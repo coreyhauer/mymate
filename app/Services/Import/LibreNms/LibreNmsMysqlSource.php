@@ -117,7 +117,18 @@ class LibreNmsMysqlSource implements LibreNmsSource, \App\Services\Rf\LibreNmsRf
             ->join('devices as d', 'd.device_id', '=', 's.device_id')
             ->whereIn('s.sensor_class', ['rssi', 'snr', 'noise-floor', 'rate', 'frequency', 'distance', 'power', 'utilization'])
             ->where('s.sensor_deleted', 0)
-            ->select('s.device_id', 'd.hostname as ip', 's.sensor_class', 's.sensor_type', 's.sensor_index', 's.sensor_descr', 's.sensor_current', 's.lastupdate');
+            // `wireless_sensors.lastupdate` is NULL for EVERY row in this install - it is not a
+            // usable freshness signal, and trusting it meant a radio whose SNMP agent had been
+            // switched off six days earlier still served -77/-54 as if live. `devices.last_polled`
+            // is the real "when did we last hear from this box", so freshness rides on that.
+            // CONVERTED TO UTC. LibreNMS's MySQL runs in the server's LOCAL zone (US Central here)
+            // while My Mate stores UTC, so comparing the two raw made every reading look five
+            // hours stale - after fixing the NULL-lastupdate bug this silently excluded the ENTIRE
+            // fleet from the chain-imbalance overlay rather than just the genuinely stale radios.
+            // Shifting by the server's own NOW()/UTC_TIMESTAMP() delta is DST- and config-proof;
+            // a named timezone would not be.
+            ->select('s.device_id', 'd.hostname as ip', 's.sensor_class', 's.sensor_type', 's.sensor_index', 's.sensor_descr', 's.sensor_current',
+                DB::raw('DATE_ADD(COALESCE(d.last_polled, FROM_UNIXTIME(s.lastupdate)), INTERVAL TIMESTAMPDIFF(SECOND, NOW(), UTC_TIMESTAMP()) SECOND) as lastupdate'));
 
         if ($since !== null) {
             $query->where('s.lastupdate', '>', $since->getTimestamp());

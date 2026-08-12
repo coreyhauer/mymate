@@ -196,9 +196,11 @@ function backhaulLines(links: Backhaul[]): LineFeatures {
             geometry: { type: 'LineString', coordinates: [l.a, l.b] },
             properties: {
                 wireless: l.media_type === 'wireless',
-                // -1 (not null) for "no per-chain data": MapLibre filters treat a missing
-                // property as 0, which would paint an unmeasured link as perfectly balanced.
-                imbalance: typeof l.chain_imbalance_db === 'number' ? l.chain_imbalance_db : -1,
+                // -999 (not null) for "no baseline / no per-chain data": MapLibre filters treat
+                // a missing property as 0, which would paint an uncharacterised link as perfectly
+                // stable. Deviation can legitimately be negative (a link that IMPROVED), so the
+                // sentinel has to sit below any real value.
+                deviation: typeof l.chain_deviation_db === 'number' ? l.chain_deviation_db : -999,
             },
         })),
     };
@@ -331,20 +333,27 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
             map.on('load', () => {
                 // --- Backhauls: real site-to-site topology, drawn under the markers ---
                 map.addSource('backhauls', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-                // Chain-imbalance overlay, drawn UNDER the normal link lines so it reads as a
-                // halo around a bad link rather than replacing the topology. One chain sagging
-                // while the other holds is the RPSMA water-intrusion signature; >=12 dB is
-                // unambiguous, 6-12 dB is worth a look. Links with no per-chain data (-1) are
-                // excluded entirely - unknown must never render as healthy.
+                // Chain-DEGRADATION overlay: how far a link's antenna-chain imbalance has moved
+                // from ITS OWN baseline, drawn UNDER the link lines as a halo.
+                //
+                // Deliberately NOT absolute imbalance. Checked against 60 days of LibreNMS RRD,
+                // an absolute >=6 dB rule flagged 87 links of which only 4 had actually changed;
+                // Reinhart<->Cambridge has sat at 4-7 dB for thirteen months while running at its
+                // expected modulation. Imbalance is mostly install geometry. A STEP is a fault:
+                // the three real ones each jumped on a single day (Leon Dorn 2.3->20.1 on 08-09,
+                // Sage<->Brettman 0.7->10.1 on 07-27, B and B Ag 4.4->10.5 on 07-18).
+                //
+                // >=3 dB amber, >=8 dB red. Links with no baseline (-999) are excluded - unknown
+                // must never render as healthy OR as a fault.
                 map.addLayer({
                     id: 'backhaul-chain-imbalance', type: 'line', source: 'backhauls',
-                    filter: ['>=', ['get', 'imbalance'], 6],
+                    filter: ['>=', ['get', 'deviation'], 3],
                     layout: { 'line-cap': 'round' },
                     paint: {
-                        'line-width': ['interpolate', ['linear'], ['get', 'imbalance'], 6, 4, 20, 9],
-                        'line-opacity': 0.55,
+                        'line-width': ['interpolate', ['linear'], ['get', 'deviation'], 3, 4, 15, 9],
+                        'line-opacity': 0.6,
                         'line-blur': 2,
-                        'line-color': ['step', ['get', 'imbalance'], '#f59e0b', 12, '#ef4444'],
+                        'line-color': ['step', ['get', 'deviation'], '#f59e0b', 8, '#ef4444'],
                     },
                 });
                 map.addLayer({

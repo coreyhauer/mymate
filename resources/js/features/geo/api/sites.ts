@@ -68,6 +68,14 @@ export interface Backhaul {
      * per-chain data for either end (unknown), which must NOT be drawn as healthy.
      */
     chain_imbalance_db?: number | null;
+    /** What this link's imbalance has historically been. null = never characterised. */
+    chain_baseline_db?: number | null;
+    /**
+     * How far the imbalance has moved FROM ITS OWN BASELINE, in dB. This is what the map
+     * colours on - the absolute figure is mostly a fixed property of the install and flagged
+     * 83 healthy links out of 87 when used directly.
+     */
+    chain_deviation_db?: number | null;
     id: number;
     media_type: string | null;
     a: [number, number]; // [lng, lat]

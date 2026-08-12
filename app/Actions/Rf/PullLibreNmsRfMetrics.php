@@ -260,7 +260,7 @@ class PullLibreNmsRfMetrics
                 $rejections,
             );
 
-            foreach ($this->buildChainRows($deviceId, $signalCandidates[$deviceId] ?? [], $ts, $rejections) as $cr) {
+            foreach ($this->buildChainRows($deviceId, $signalCandidates[$deviceId] ?? [], $lastUpdateByDevice[$deviceId] ?? null, $ts, $rejections) as $cr) {
                 $chainRows[] = $cr;
             }
         }
@@ -442,10 +442,14 @@ class PullLibreNmsRfMetrics
      * Only genuinely per-chain readings qualify: a descr like "Overall RSSI" is the device-level
      * figure again and would double-count, and single-chain radios produce nothing here.
      *
+     * STALENESS IS NOT OPTIONAL HERE. LibreNMS retains a device's last sensor values forever
+     * after it stops responding, so a frozen reading is indistinguishable from a live one
+     * without `source_lastupdate` - see the note on that field below.
+     *
      * @param  array<string, list<array{descr:?string, value:float, type:?string}>>  $signalMetrics
      * @return list<array<string, mixed>>
      */
-    private function buildChainRows(int $deviceId, array $signalMetrics, Carbon $ts, array &$rejections): array
+    private function buildChainRows(int $deviceId, array $signalMetrics, ?string $sourceLastupdate, Carbon $ts, array &$rejections): array
     {
         $rows = [];
 
@@ -476,7 +480,13 @@ class PullLibreNmsRfMetrics
                 'freq_mhz' => null,
                 'if_errors_in' => null,
                 'if_errors_out' => null,
-                'source_lastupdate' => null,
+                // MUST carry the source timestamp. Nulling it (as this first shipped) threw away
+                // the only signal that says whether the reading is current, and LibreNMS keeps
+                // serving a device's LAST KNOWN sensor values indefinitely after it stops
+                // answering SNMP. roben2tlam had been unpolled for SIX DAYS while still reporting
+                // -77/-54; the map showed a 23 dB imbalance the radio itself put at 1 dB, and a
+                // tech went out to look at a link that was fine.
+                'source_lastupdate' => $sourceLastupdate,
             ];
         }
 

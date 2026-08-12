@@ -92,7 +92,7 @@ class GeoController extends Controller
      */
     public function backhauls(): JsonResponse
     {
-        $imbalance = $this->chainImbalanceByDevice();
+        $chain = $this->chainDeviationByDevice();
 
         $rows = DB::table('site_links as l')
             ->join('sites as a', 'a.id', '=', 'l.site_a_id')
@@ -100,20 +100,31 @@ class GeoController extends Controller
             ->whereNotNull('a.latitude')->whereNotNull('b.latitude')
             ->selectRaw('l.id, l.media_type, l.device_a_id, l.device_b_id, a.longitude AS a_lng, a.latitude AS a_lat, b.longitude AS b_lng, b.latitude AS b_lat')
             ->get()
-            ->map(function ($r) use ($imbalance) {
+            ->map(function ($r) use ($chain) {
                 // Worst end wins: water in ONE pigtail is a fault on the link, and reporting the
                 // healthier end would hide exactly the thing this is meant to surface.
-                $vals = array_filter([
-                    $imbalance[$r->device_a_id] ?? null,
-                    $imbalance[$r->device_b_id] ?? null,
-                ], fn ($v) => $v !== null);
+                $ends = array_filter([
+                    $chain[$r->device_a_id] ?? null,
+                    $chain[$r->device_b_id] ?? null,
+                ]);
+
+                $worst = null;
+                foreach ($ends as $e) {
+                    if ($e['deviation'] !== null && ($worst === null || $e['deviation'] > $worst['deviation'])) {
+                        $worst = $e;
+                    }
+                }
 
                 return [
                     'id' => (int) $r->id,
                     'media_type' => $r->media_type,
                     'a' => [(float) $r->a_lng, (float) $r->a_lat],
                     'b' => [(float) $r->b_lng, (float) $r->b_lat],
-                    'chain_imbalance_db' => $vals === [] ? null : round(max($vals), 1),
+                    // Absolute imbalance is context only - it is largely a FIXED property of an
+                    // install and is not what colours the map (see the baseline migration note).
+                    'chain_imbalance_db' => $worst === null ? null : round($worst['now'], 1),
+                    'chain_baseline_db' => $worst === null ? null : round($worst['baseline'], 1),
+                    'chain_deviation_db' => $worst === null ? null : round($worst['deviation'], 1),
                 ];
             });
 
@@ -129,16 +140,24 @@ class GeoController extends Controller
      * device-level average the rest of the RF pipeline stores. Per-chain rows only began landing
      * 2026-08-12, so a device with none simply returns null (unknown), never 0 (healthy).
      *
-     * @return array<int, float> device_id => imbalance in dB
+     * STALE READINGS ARE EXCLUDED, not shown. LibreNMS serves a device's last known sensor
+     * values indefinitely after it stops answering SNMP, so an unpolled radio looks identical to
+     * a live one. roben2tlam went unpolled for six days while still reporting -77/-54 and this
+     * overlay flagged a 23 dB fault the radio itself measured at 1 dB. A stale link must read as
+     * UNKNOWN (null, undrawn), never as a fault and never as healthy.
+     *
+     * @return array<int, array{now:float, baseline:float|null, deviation:float|null}>
      */
-    private function chainImbalanceByDevice(): array
+    private function chainDeviationByDevice(): array
     {
         $staleAfter = (int) config('mymate.librenms_rf.stale_after_minutes', 30);
 
         $rows = DB::select(<<<'SQL'
             SELECT s.device_id,
-                   MAX(s.rssi_dbm) - MIN(s.rssi_dbm) AS imbalance_db
+                   MAX(s.rssi_dbm) - MIN(s.rssi_dbm) AS imbalance_db,
+                   MAX(st.chain_imbalance_baseline_db) AS baseline_db
               FROM rf_link_samples s
+              LEFT JOIN rf_link_state st ON st.device_id = s.device_id
               JOIN (
                     SELECT device_id, sensor_index, MAX(ts) AS ts
                       FROM rf_link_samples
@@ -148,14 +167,30 @@ class GeoController extends Controller
                 ON newest.device_id = s.device_id
                AND newest.sensor_index = s.sensor_index
                AND newest.ts = s.ts
-             WHERE s.sensor_index <> '' AND s.rssi_dbm IS NOT NULL
+             WHERE s.sensor_index <> ''
+               AND s.rssi_dbm IS NOT NULL
+               AND s.source_lastupdate IS NOT NULL
+               AND s.source_lastupdate >= ?
              GROUP BY s.device_id
             HAVING COUNT(*) > 1
-            SQL, [now()->subMinutes($staleAfter)->toDateTimeString()]);
+            SQL, [
+            now()->subMinutes($staleAfter)->toDateTimeString(),
+            now()->subMinutes($staleAfter)->toDateTimeString(),
+        ]);
 
         $out = [];
         foreach ($rows as $r) {
-            $out[(int) $r->device_id] = (float) $r->imbalance_db;
+            $now = (float) $r->imbalance_db;
+            $base = $r->baseline_db === null ? null : (float) $r->baseline_db;
+
+            $out[(int) $r->device_id] = [
+                'now' => $now,
+                'baseline' => $base,
+                // No baseline = no verdict. A link never characterised must read as UNKNOWN
+                // rather than be judged against a fleet-wide guess - that guess is exactly what
+                // produced 83 false positives out of 87.
+                'deviation' => $base === null ? null : $now - $base,
+            ];
         }
 
         return $out;
