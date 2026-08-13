@@ -1,6 +1,42 @@
 <?php
 
 return [
+
+    /*
+     | Antenna gain (dBi) per radio model, for the expected-RSSI link budget in
+     | App\\Actions\\Rf\\ComputeSignalDeficit. Values confirmed by Corey 2026-08-12/13.
+     |
+     | Rockets/ISO Stations have NO integrated antenna - 27 dBi is the RF Elements StarterDish
+     | they are "primarily" paired with. Good default, NOT a certainty: an AM-5G sector would be
+     | 6-10 dB off, which is inside fault-threshold range. PrismStation same caveat - usually a
+     | 14 dBi horn, but "it could indeed be a 27 dB starter dish. They aren't always documented."
+     | So treat deficits on those models as LOWER CONFIDENCE than PowerBeam/LiteBeam, whose
+     | antenna is integrated and therefore certain.
+     |
+     | Longest matching key wins, so "PowerBeam 5AC 620" beats "PowerBeam 5AC".
+     */
+    'antenna_gain_dbi' => [
+        'PowerBeam 5AC 300' => 22.0,
+        'PowerBeam 5AC 400' => 25.0,
+        'PowerBeam 5AC 500' => 27.0,
+        'PowerBeam 5AC 620' => 29.0,
+        'PowerBeam 5AC ISO' => 25.0,
+        'PowerBeam 5AC' => 25.0,
+        'PowerBeam M5' => 25.0,
+        'LiteBeam 5AC Gen2' => 23.0,
+        'LiteBeam 5AC LR' => 26.0,
+        'LiteBeam 5AC' => 23.0,
+        'NanoStation 5AC loco' => 13.0,
+        'LiteAP GPS' => 16.0,
+        'Rocket Prism 5AC' => 27.0,
+        'Rocket 5AC Lite' => 27.0,
+        'Rocket 5AC Prism' => 27.0,
+        'Rocket 2AC Prism' => 22.0,
+        'PrismStation 5AC' => 14.0,
+        'ISO Station 5AC' => 27.0,
+        'airFiber 5XHD' => 27.0,
+        'LTU-Rocket' => 17.5,
+    ],
     'voltron' => [
         // Shared secret the gigtool Voltron nginx location injects (X-Voltron-Proxy-Secret)
         // alongside X-Voltron-Email. Empty = SSO off (normal password login).
