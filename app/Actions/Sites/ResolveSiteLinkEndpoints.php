@@ -419,7 +419,7 @@ class ResolveSiteLinkEndpoints
      * @param  array<int, array{word:string,site_id:int}[]>  $fuzzyIndex
      * @return array{method: string, matched: string, weak: bool, role: ?string}|null
      */
-    private static function matchToken(string $token, string $targetNname, int $targetSiteId, bool $allowSuffixStrip, array $fuzzyIndex): ?array
+    public static function matchToken(string $token, string $targetNname, int $targetSiteId, bool $allowSuffixStrip, array $fuzzyIndex): ?array
     {
         if (self::tokMatch($token, $targetNname)) {
             return ['method' => 'exact', 'matched' => $token, 'weak' => false, 'role' => null];
@@ -500,20 +500,20 @@ class ResolveSiteLinkEndpoints
         ];
     }
 
-    private static function normalize(string $s): string
+    public static function normalize(string $s): string
     {
         return preg_replace('/[^a-z0-9]+/', '', mb_strtolower($s)) ?? '';
     }
 
     /** Individual normalized words of a site name (e.g. "Todd Heinrich" -> ["todd", "heinrich"]). */
-    private static function siteWords(string $name): array
+    public static function siteWords(string $name): array
     {
         $words = preg_split('/\s+/', trim($name)) ?: [];
 
         return array_values(array_filter(array_map(self::normalize(...), $words), fn (string $w): bool => $w !== ''));
     }
 
-    private static function tokMatch(string $token, string $nname): bool
+    public static function tokMatch(string $token, string $nname): bool
     {
         if ($token === '' || $nname === '') {
             return false;
@@ -530,7 +530,7 @@ class ResolveSiteLinkEndpoints
      *
      * @return array<int, array{t1: string, t2: string, source: 'glued'|'spaced'}>
      */
-    private static function parsePairs(string $name): array
+    public static function parsePairs(string $name): array
     {
         $pairs = [];
 
@@ -554,7 +554,7 @@ class ResolveSiteLinkEndpoints
      * token ending in "st"/"ap" blindly by callers - see class docblock on why this is
      * one-sided (never the self token).
      */
-    private static function stripRoleSuffix(string $token): ?string
+    public static function stripRoleSuffix(string $token): ?string
     {
         if (preg_match(self::ROLE_SUFFIX_PATTERN, $token, $m)) {
             return mb_strtolower($m[1]);
@@ -564,7 +564,7 @@ class ResolveSiteLinkEndpoints
     }
 
     /** AP or ST, inferred from the suffix that stripRoleSuffix() removed. */
-    private static function roleFromSuffix(string $originalToken, string $strippedPrefix): ?string
+    public static function roleFromSuffix(string $originalToken, string $strippedPrefix): ?string
     {
         $suffix = mb_strtolower(mb_substr($originalToken, mb_strlen($strippedPrefix)));
 
@@ -582,7 +582,7 @@ class ResolveSiteLinkEndpoints
      * @param  Collection<int, array{id:int,nname:string,words:string[],lat:?float,lon:?float}>  $sites
      * @return array<int, array{word:string,site_id:int}[]> Keyed by word length, for a cheap length-window scan.
      */
-    private static function buildFuzzyIndex(Collection $sites): array
+    public static function buildFuzzyIndex(Collection $sites): array
     {
         $byLength = [];
 
@@ -607,7 +607,7 @@ class ResolveSiteLinkEndpoints
      * @param  array<int, array{word:string,site_id:int}[]>  $fuzzyIndex
      * @return array{site_id: int, distance: int, word: string}|null
      */
-    private static function fuzzyMatch(string $token, array $fuzzyIndex): ?array
+    public static function fuzzyMatch(string $token, array $fuzzyIndex): ?array
     {
         $token = mb_strtolower($token);
         $tokenLen = mb_strlen($token);

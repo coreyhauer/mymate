@@ -45,6 +45,12 @@ Schedule::job(new \App\Jobs\PullLibreNmsRfMetricsJob)->everyFiveMinutes()->name(
 // long-retention history the baseline/alerting stage will read). Idempotent upsert.
 Schedule::job(new \App\Jobs\RollupRfLinkDailyStatsJob)->dailyAt('00:25')->name('rf-daily-rollup')->withoutOverlapping();
 
+// DISCOVER site_links that UISP's data_link table never had, from reciprocal alpha2bravo naming.
+// Must run BEFORE resolve-endpoints so links created here get their devices attached in the same
+// nightly pass. Dennis Loucks read "No fiber drain reachable" purely because one such link was
+// missing; 26 more were, and creating them took the fleet's unreachable sites from 132 to 120.
+Schedule::command('mymate:site-links:derive-from-naming')->dailyAt('01:05')->name('site-link-derive')->withoutOverlapping();
+
 // Re-resolve site_links endpoint devices from the alpha2bravo naming convention nightly -
 // newly imported/renamed radios get matched without anyone running the command by hand.
 Schedule::command('mymate:site-links:resolve-endpoints')->dailyAt('01:10')->name('site-link-endpoints')->withoutOverlapping();
