@@ -456,6 +456,18 @@ return [
         // Sanity bound on rows accepted from one concentrator (real ones carry ~15-80). Hitting
         // it logs loudly and truncates - never a silent partial write.
         'max_sessions_per_device' => (int) env('MYMATE_PPPOE_MAX_SESSIONS', 4000),
+        // How long a row may go un-refreshed before it stops counting as "online" (minutes).
+        // A concentrator renamed out of the filter, unmonitored, or otherwise dropped from the
+        // sweep stops refreshing its rows - without this they would be served as live sessions
+        // forever. Two things act on it: the read API hides rows older than this by default
+        // (?stale=1 / ?max_age_minutes= override), and the sweep tick deletes rows older than
+        // stale_after_minutes x reap_multiplier outright. Must stay comfortably above the
+        // 5-minute cadence plus the stagger window or a healthy slow shard would flicker out
+        // of the default view.
+        'stale_after_minutes' => (int) env('MYMATE_PPPOE_STALE_AFTER_MINUTES', 30),
+        // Reap only well past the staleness horizon, so "hidden by default" always happens
+        // first and deletion is the long-stop: 30m x 8 = 4h of grace.
+        'reap_multiplier' => (int) env('MYMATE_PPPOE_REAP_MULTIPLIER', 8),
     ],
 
     // Firmware upgrades. Ordered upgrades wait for each device to
