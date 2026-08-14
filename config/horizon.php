@@ -225,8 +225,31 @@ return [
             'maxJobs' => 0,
             'memory' => 128,
             'tries' => 1,
-            'timeout' => 60,
+            // Ceiling for the worker; the job sets its own `$timeout` from
+            // mymate.poll.job_timeout and this must stay ABOVE it, or the worker kills the
+            // batch before the job's own limit is ever reached. Held at 60 while batches
+            // needed 206s, which is what made every throughput batch a total write-off.
+            'timeout' => (int) config('mymate.poll.job_timeout', 120) + 10,
             'nice' => 0,
+        ],
+
+        // Device metrics (cpu/mem/temp + the RouterOS OSPF read) on their OWN queue, for
+        // exactly the reason supervisor-discover exists: two lanes that must not be able to
+        // starve each other do not belong on one queue. Metrics batches used to ride `poll`,
+        // so a throughput backlog silenced them completely - device_metric_samples took zero
+        // rows for six days and OSPF state went with them, with no error anywhere.
+        'supervisor-metrics' => [
+            'connection' => 'redis',
+            'queue' => [(string) config('mymate.device_metrics.queue', 'metrics')],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'size',
+            'maxProcesses' => (int) env('MYMATE_METRICS_PROCESSES', 3),
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => (int) config('mymate.device_metrics.job_timeout', 120) + 10,
+            'nice' => 5, // yield to throughput polling under contention
         ],
 
         // Interface (re)discovery: isolated from `poll` on purpose. A discovery sweep walks far
@@ -364,6 +387,12 @@ return [
             'supervisor-ping' => ['maxProcesses' => (int) env('MYMATE_PING_PROCESSES', 2)],
             // Raise with the fleet: ~ shards you want running concurrently.
             'supervisor-poll' => ['maxProcesses' => 20, 'balanceMaxShift' => 5, 'balanceCooldown' => 3],
+            // Metrics are ~1.42s/device measured, so the whole fleet is ~34,000 worker-
+            // seconds; 6 workers clear it in roughly 95 minutes. The dispatch guard throttles
+            // to whatever the pool can actually drain, so this sets the refresh rate rather
+            // than deciding whether metrics run at all. Raise it (with poll) to go faster -
+            // see the capacity note in PollDispatcher.
+            'supervisor-metrics' => ['maxProcesses' => (int) env('MYMATE_METRICS_PROCESSES', 6)],
             'supervisor-scan' => ['maxProcesses' => 4],
             'supervisor-upgrade' => ['maxProcesses' => 4],
             'supervisor-backup' => ['maxProcesses' => 3],
@@ -383,6 +412,7 @@ return [
             'supervisor-import' => ['maxProcesses' => 1],
             'supervisor-trace' => ['maxProcesses' => 1],
             'supervisor-pppoe' => ['maxProcesses' => 1],
+            'supervisor-metrics' => ['maxProcesses' => 1],
         ],
     ],
 

@@ -122,6 +122,32 @@ return [
         // the byte/interface caps below.
         'shards' => (int) env('MYMATE_POLL_SHARDS', 16),
 
+        // A FLOOR on batch size, and the thing that actually keeps a shard inside its
+        // timeout. `shards` alone cannot: it is a fixed number, so every device added to
+        // the fleet makes every batch bigger, and a batch that grows past the worker
+        // timeout stops producing ANY output rather than less of it (PollInterfaces writes
+        // its interface upsert and its history rows after the device loop, so a job killed
+        // mid-loop persists nothing at all - it burns a worker for the full timeout and
+        // leaves no trace but a failed_jobs row).
+        //
+        // That is exactly how this box lost throughput history: 23,984 devices over the
+        // 128 shards configured here is ~187 devices per batch, a measured 206s of work
+        // against a 60s timeout, so every batch died ~29% in and interface_samples took
+        // zero rows for ten days.
+        //
+        // The dispatcher now takes whichever of `shards` / `ceil(devices / this)` yields
+        // MORE shards, so batch size is bounded no matter how the fleet grows. Sizing:
+        // measured cost is ~1.4s/device (SNMP 1.43, RouterOS non-concentrator 0.31, PPPoE
+        // concentrator 2.31), so 32 devices is ~45s typical and ~74s for an all-
+        // concentrator batch - both inside `job_timeout` below with room to spare.
+        'devices_per_shard' => (int) env('MYMATE_POLL_DEVICES_PER_SHARD', 32),
+
+        // Whole-job ceiling (s) for a throughput batch, mirrored by supervisor-poll's
+        // worker timeout and by the per-shard overlap lock's expireAfter. Generous on
+        // purpose: a timeout here is a total loss of the batch's output, so the value that
+        // matters is "comfortably longer than a worst-case batch", not "average + a bit".
+        'job_timeout' => (int) env('MYMATE_POLL_JOB_TIMEOUT', 120),
+
         // Interface discovery is sharded separately and onto its own queue. Keep this WELL
         // below `shards`: discovery is a full MIB walk on a slow cadence, so a handful of
         // long-running batch jobs is the right shape - the failure mode to avoid is a job
@@ -304,6 +330,20 @@ return [
         // Seconds between live-frequency SNMP reads per device (RF channel barely moves).
         'frequency_interval' => (int) env('MYMATE_FREQUENCY_INTERVAL', 600),
         'broadcast' => (bool) env('MYMATE_BROADCAST_METRICS', true),
+
+        // Metrics get their OWN queue, for the same reason interface discovery does (see
+        // PollDispatcher::dispatchDiscovery's docblock: "sharing `poll` is what starved
+        // throughput before"). Metrics batches used to ride the `poll` queue AND share its
+        // dispatch-time backpressure guard, so a throughput backlog silenced metrics
+        // completely - device_metric_samples took zero rows for six days, and because
+        // ReadOspf runs inside the metrics batch, OSPF state went with it. Two lanes that
+        // must not be able to starve each other do not belong on one queue.
+        'queue' => env('MYMATE_METRICS_QUEUE', 'metrics'),
+
+        // Same batch-size floor and job ceiling as throughput, and for the same reason -
+        // PollDeviceMetrics also persists after its device loop. Measured ~1.42s/device.
+        'devices_per_shard' => (int) env('MYMATE_METRICS_DEVICES_PER_SHARD', 32),
+        'job_timeout' => (int) env('MYMATE_METRICS_JOB_TIMEOUT', 120),
 
         // Per-vendor SNMP OID profiles. Picked by a case-insensitive substring match on
         // the device's detected `vendor` (CaptureDeviceFacts), falling back to `default`
