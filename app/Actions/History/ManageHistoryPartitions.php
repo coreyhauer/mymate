@@ -4,6 +4,7 @@ namespace App\Actions\History;
 
 use App\Support\Settings;
 use Illuminate\Support\Carbon;
+use App\Support\EngineLog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -16,8 +17,18 @@ use Illuminate\Support\Facades\Schema;
  */
 class ManageHistoryPartitions
 {
-    /** Parent tables that are daily-partitioned; each partition is "{table}_YYYYMMDD". */
-    private const TABLES = ['interface_samples', 'device_metric_samples', 'ping_samples', 'sensor_samples'];
+    /**
+     * Parent tables that are daily-partitioned; each partition is "{table}_YYYYMMDD".
+     *
+     * `rf_link_samples` MUST be here. It was created partitioned by its own migration but never
+     * added to this list, so once the migration's hand-made partitions ran out (2026-08-07) every
+     * RF sample was silently discarded - no error, no alert, and `rf_link_state` kept updating so
+     * the current-values view looked perfectly healthy while five days of history evaporated.
+     * The nightly rollup then had nothing to roll up, which stalled the 30-day RSSI baseline that
+     * the wind/degradation detection is built on. Adding a partitioned table without adding it
+     * here is a silent data-loss bug; there is no runtime check that would catch it.
+     */
+    private const TABLES = ['interface_samples', 'device_metric_samples', 'ping_samples', 'sensor_samples', 'rf_link_samples'];
 
     /** @return array{created:int, dropped:int} */
     public function __invoke(): array
@@ -39,6 +50,8 @@ class ManageHistoryPartitions
             }
             $dropped += $this->dropPartitionsBefore($table, $cutoff);
         }
+
+        $this->warnAboutUnmanagedPartitionedTables();
 
         return ['created' => $created, 'dropped' => $dropped];
     }
@@ -94,5 +107,42 @@ class ManageHistoryPartitions
         SQL, [$table]);
 
         return array_map(static fn ($r): string => $r->name, $rows);
+    }
+
+    /**
+     * Shout if the database has a RANGE-partitioned table this class does not manage.
+     *
+     * `rf_link_samples` was added partitioned by its own migration but never listed in TABLES.
+     * Its migration-made partitions covered 2026-07-30..08-07; the moment they ran out every
+     * insert began failing and FIVE DAYS of RF history were lost silently - no exception
+     * surfaced anywhere an operator would look, and the derived `rf_link_state` kept updating,
+     * so every dashboard still looked healthy. Nothing in the system would ever have told us.
+     *
+     * This is deliberately noisy rather than clever: adding a partitioned table without adding
+     * it here is data loss with no other symptom, so it warrants a log line every single run
+     * until somebody fixes it.
+     */
+    private function warnAboutUnmanagedPartitionedTables(): void
+    {
+        try {
+            $partitioned = DB::select(<<<'SQL'
+                SELECT c.relname AS table_name
+                  FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                 WHERE c.relkind = 'p' AND n.nspname = current_schema()
+                SQL);
+        } catch (\Throwable) {
+            return; // never let a diagnostic break partition maintenance
+        }
+
+        foreach ($partitioned as $row) {
+            $name = (string) $row->table_name;
+            if (! in_array($name, self::TABLES, true)) {
+                EngineLog::warning('history: partitioned table is NOT managed - it will stop accepting writes when its existing partitions run out', [
+                    'table' => $name,
+                    'fix' => 'add it to ManageHistoryPartitions::TABLES',
+                ]);
+            }
+        }
     }
 }
