@@ -76,6 +76,15 @@ export interface Backhaul {
      * 83 healthy links out of 87 when used directly.
      */
     chain_deviation_db?: number | null;
+    /** Worst end's shortfall vs expected receive signal. Context only - see actionable_deficit_db. */
+    signal_deficit_db?: number | null;
+    /** LiDAR verdict: clear | los_only | blocked | bad_geo | no_lidar. Null = not yet checked. */
+    los_verdict?: string | null;
+    los_clearance_m?: number | null;
+    los_canopy_m?: number | null;
+    /** Deficit ONLY where the path should be clear - null on obstructed links, so terrain never
+     *  renders as a fault. This is what the map colours on. */
+    actionable_deficit_db?: number | null;
     id: number;
     media_type: string | null;
     a: [number, number]; // [lng, lat]

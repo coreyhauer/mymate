@@ -201,6 +201,11 @@ function backhaulLines(links: Backhaul[]): LineFeatures {
                 // stable. Deviation can legitimately be negative (a link that IMPROVED), so the
                 // sentinel has to sit below any real value.
                 deviation: typeof l.chain_deviation_db === 'number' ? l.chain_deviation_db : -999,
+                // Signal deficit, but ONLY where the LiDAR tool says the path should be clear.
+                // The API nulls this for 'blocked'/'bad_geo'/unchecked links, so an obstructed
+                // link can never colour as a fault - same -999 sentinel reasoning as deviation.
+                deficit: typeof l.actionable_deficit_db === 'number' ? l.actionable_deficit_db : -999,
+                losVerdict: l.los_verdict ?? '',
             },
         })),
     };
@@ -354,6 +359,32 @@ export function GeoMapLibre({ styleUrl, weatherUrl }: { styleUrl: string; weathe
                         'line-opacity': 0.6,
                         'line-blur': 2,
                         'line-color': ['step', ['get', 'deviation'], '#f59e0b', 8, '#ef4444'],
+                    },
+                });
+                // UNDERPERFORMANCE overlay: how far below its EXPECTED signal a link runs, gated
+                // on line-of-sight. Complements the chain overlay above - that finds ASYMMETRY
+                // between antenna chains, this finds a link that is simply weak. A link can be
+                // perfectly balanced and still 30 dB down.
+                //
+                // GATED ON LOS, and that gate is the whole point: of the first 12 underperforming
+                // links checked, SIX were explained by terrain (five 'blocked' plus one a tech had
+                // already named "...NLOS"). Cody Przymus is the canonical case - worst deficit on
+                // the network, and a 16.6 m treeline at his end of a 1.89 km path. Obstruction is
+                // physics, not a fault, and no self-baseline can filter it because it has been bad
+                // forever. The API therefore only populates `deficit` for clear/los_only paths.
+                //
+                // Drawn as a DASHED casing so it reads differently from the chain halo when both
+                // fire on one link. >=10 dB amber, >=20 dB red - well above the method's own ~6 dB
+                // scatter (the implied-gain IQR), so anything drawn here is outside the noise.
+                map.addLayer({
+                    id: 'backhaul-signal-deficit', type: 'line', source: 'backhauls',
+                    filter: ['>=', ['get', 'deficit'], 10],
+                    layout: { 'line-cap': 'butt' },
+                    paint: {
+                        'line-width': ['interpolate', ['linear'], ['get', 'deficit'], 10, 3, 40, 7],
+                        'line-opacity': 0.85,
+                        'line-dasharray': [2, 1.5],
+                        'line-color': ['step', ['get', 'deficit'], '#fbbf24', 20, '#dc2626'],
                     },
                 });
                 map.addLayer({

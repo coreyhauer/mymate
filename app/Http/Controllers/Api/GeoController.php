@@ -98,7 +98,11 @@ class GeoController extends Controller
             ->join('sites as a', 'a.id', '=', 'l.site_a_id')
             ->join('sites as b', 'b.id', '=', 'l.site_b_id')
             ->whereNotNull('a.latitude')->whereNotNull('b.latitude')
-            ->selectRaw('l.id, l.media_type, l.device_a_id, l.device_b_id, a.longitude AS a_lng, a.latitude AS a_lat, b.longitude AS b_lng, b.latitude AS b_lat')
+            ->leftJoin('rf_link_state as ra', 'ra.device_id', '=', 'l.device_a_id')
+            ->leftJoin('rf_link_state as rb', 'rb.device_id', '=', 'l.device_b_id')
+            ->selectRaw('l.id, l.media_type, l.device_a_id, l.device_b_id, a.longitude AS a_lng, a.latitude AS a_lat, b.longitude AS b_lng, b.latitude AS b_lat,
+                         l.los_verdict, l.los_clearance_m, l.los_canopy_m,
+                         ra.signal_deficit_db AS def_a, rb.signal_deficit_db AS def_b')
             ->get()
             ->map(function ($r) use ($chain) {
                 // Worst end wins: water in ONE pigtail is a fault on the link, and reporting the
@@ -125,10 +129,35 @@ class GeoController extends Controller
                     'chain_imbalance_db' => $worst === null ? null : round($worst['now'], 1),
                     'chain_baseline_db' => $worst === null ? null : round($worst['baseline'], 1),
                     'chain_deviation_db' => $worst === null ? null : round($worst['deviation'], 1),
+
+                    // How far below its EXPECTED receive signal the worse end runs - the other
+                    // half of link health. Chain imbalance finds ASYMMETRY; this finds absolute
+                    // underperformance, and a link can be perfectly balanced and still terrible.
+                    'signal_deficit_db' => $this->worstDeficit($r),
+
+                    // ... but a deficit is only a FAULT if the path should be clear. A chronically
+                    // NLOS link is working as well as physics permits, and no self-baseline can
+                    // filter it out because it has been bad forever. 'blocked' means DO NOT
+                    // dispatch; 'bad_geo' means the endpoints' GPS is untrustworthy so the terrain
+                    // profile means nothing; null means not yet checked (never assume clear).
+                    'los_verdict' => $r->los_verdict,
+                    'los_clearance_m' => $r->los_clearance_m === null ? null : round((float) $r->los_clearance_m, 1),
+                    'los_canopy_m' => $r->los_canopy_m === null ? null : round((float) $r->los_canopy_m, 1),
+                    // Only a deficit on a path we believe is clear should ever colour the map red.
+                    'actionable_deficit_db' => in_array($r->los_verdict, ['clear', 'los_only'], true)
+                        ? $this->worstDeficit($r) : null,
                 ];
             });
 
         return response()->json(['data' => $rows]);
+    }
+
+    /** Worse of the two ends - reporting the healthier end would hide the fault. */
+    private function worstDeficit(object $r): ?float
+    {
+        $vals = array_filter([$r->def_a ?? null, $r->def_b ?? null], fn ($v) => $v !== null);
+
+        return $vals === [] ? null : round((float) max($vals), 1);
     }
 
     /**

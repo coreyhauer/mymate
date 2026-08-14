@@ -2,6 +2,11 @@
 
 return [
 
+    // LiDAR line-of-sight tool (reference_fwa_los_api_for_rf_triage). Used to decide whether an
+    // underperforming backhaul is FAULTY or merely obstructed - a chronically NLOS link cannot be
+    // filtered out by any self-baseline, because it has been bad forever.
+    'los_api_url' => env('MYMATE_LOS_API_URL', 'http://10.66.71.73:8088'),
+
     /*
      | Antenna gain (dBi) per radio model, for the expected-RSSI link budget in
      | App\\Actions\\Rf\\ComputeSignalDeficit. Values confirmed by Corey 2026-08-12/13.
