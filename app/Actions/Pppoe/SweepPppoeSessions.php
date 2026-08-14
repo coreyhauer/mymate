@@ -13,8 +13,10 @@ use Illuminate\Support\Facades\DB;
  * Sweep the ACTIVE PPPoE sessions off a *set* of concentrators (one shard) and materialise
  * them into `pppoe_sessions` - the scale-out unit, mirroring App\Actions\Polling\PollInterfaces:
  *  - one device's failure is caught, logged and skipped; it never sinks the shard,
- *  - a device's rows are replaced wholesale inside ONE transaction, so a reader never sees a
- *    half-written device and a failed read never destroys the previous (stale but honest) answer.
+ *  - a device's rows are reconciled (upsert what is live, delete what is gone) inside ONE
+ *    transaction, so a reader never sees a half-written device and a failed read never
+ *    destroys the previous (stale but honest) answer. See persist() for why this is an
+ *    upsert rather than the delete-then-insert it started as.
  *
  * Credential resolution is NOT re-implemented here: RouterOsTarget::fromDevice is "the one
  * place this resolution lives" and it reads `$device->credential` - the generic `credential_id`
@@ -39,10 +41,6 @@ class SweepPppoeSessions
         }
 
         $startedAt = microtime(true);
-        // ISO-8601 with an explicit offset so the timestamptz column is unambiguous regardless
-        // of the connection's TimeZone setting. One stamp for the whole shard: every row a
-        // sweep writes shares it, which is what makes `?since=` a clean equality/range read.
-        $sweptAt = now()->toIso8601String();
 
         $devices = Device::with('credential')->whereIn('id', $deviceIds)->get();
 
@@ -52,7 +50,7 @@ class SweepPppoeSessions
 
         foreach ($devices as $device) {
             try {
-                $rows = $this->readSessions($device, $sweptAt);
+                $rows = $this->readSessions($device);
             } catch (\Throwable $e) {
                 // One unreachable/erroring concentrator must not take the shard down. Its
                 // previous rows are left in place (stale, with an older swept_at) rather than
@@ -108,7 +106,7 @@ class SweepPppoeSessions
      *
      * @return list<array<string, mixed>>
      */
-    private function readSessions(Device $device, string $sweptAt): array
+    private function readSessions(Device $device): array
     {
         $conn = $this->client->open($this->target($device));
 
@@ -149,9 +147,12 @@ class SweepPppoeSessions
                 'device_id' => (int) $device->id,
                 'username' => $username,
                 'remote_address' => self::text($reply['address'] ?? null),
-                'caller_id' => self::text($reply['caller-id'] ?? null),
+                // Normalised to '' rather than null: it is part of the natural key the upsert
+                // conflicts on, and Postgres treats NULLs as distinct in a unique index, which
+                // would let the same session insert a fresh duplicate row on every sweep.
+                // PppoeSessionResource maps '' back to null, so the API shape is unchanged.
+                'caller_id' => self::text($reply['caller-id'] ?? null) ?? '',
                 'uptime_seconds' => RouterOsDuration::toSeconds($reply['uptime'] ?? null),
-                'swept_at' => $sweptAt,
             ];
         }
 
@@ -159,25 +160,81 @@ class SweepPppoeSessions
     }
 
     /**
-     * Replace this device's rows wholesale in ONE transaction. Called only after a fully
-     * successful read, so partial rows for a device are structurally impossible.
+     * Reconcile this device's rows in ONE transaction: UPSERT everything the read returned,
+     * then delete only what the read did NOT return. Called only after a fully successful read,
+     * so partial rows for a device are structurally impossible.
+     *
+     * This used to be DELETE-then-INSERT, which had three problems:
+     *
+     *  1. The DELETE ran before the empty-result guard. A read that succeeded at the transport
+     *     level but yielded zero usable rows - the API user losing its `ppp` policy, or every
+     *     row arriving with an empty name and being skipped - wiped a healthy concentrator's
+     *     sessions and reported success. The guard is now the first thing in the transaction,
+     *     and a device that had rows and now reports none is logged rather than silently
+     *     emptied (the sweep is left alone to re-confirm on the next tick).
+     *  2. Re-inserting every row re-minted its autoincrement id, so the read API's id-cursor
+     *     pagination pointed into ids that no longer existed: a client walking pages silently
+     *     lost every concentrator swept mid-walk. Upserting on the natural key keeps a
+     *     continuing session's id stable for as long as the session lives.
+     *  3. It churned ~13k dead tuples every 5 minutes (~7.5M/day) for a table whose contents
+     *     barely change between sweeps, which is pure vacuum load. Upsert only writes rows
+     *     that actually moved.
+     *
+     * The natural key is (device_id, username, caller_id) - one subscriber's session on one
+     * concentrator. caller_id is normalised to '' at read time because a NULL never conflicts
+     * in a Postgres unique index.
      *
      * @param  list<array<string, mixed>>  $rows
      */
     private function persist(int $deviceId, array $rows): void
     {
         DB::transaction(function () use ($deviceId, $rows): void {
-            DB::table('pppoe_sessions')->where('device_id', $deviceId)->delete();
+            // Whole seconds: swept_at is timestamp(0), so a value carrying microseconds would
+            // be rounded on the way into the column and no longer equal the value we prune
+            // against below - which would delete the rows this very sweep just wrote.
+            $sweptAt = now()->startOfSecond();
 
             if ($rows === []) {
+                // GUARD BEFORE ANY WRITE. "I could not see any sessions" must never be
+                // recorded as "there are no sessions" - an unreachable-shaped failure that
+                // still returns cleanly would otherwise erase a live concentrator.
+                $existing = DB::table('pppoe_sessions')->where('device_id', $deviceId)->count();
+                if ($existing > 0) {
+                    EngineLog::warning('pppoe: device returned no sessions but has rows - keeping them', [
+                        'device_id' => $deviceId,
+                        'existing_rows' => $existing,
+                    ]);
+                }
+
                 return;
             }
 
-            // Chunked so a pathologically large concentrator can't exceed Postgres's
-            // bound-parameter ceiling (65535 / 6 columns); a normal device is one insert.
-            foreach (array_chunk($rows, 1000) as $chunk) {
-                DB::table('pppoe_sessions')->insert($chunk);
+            // Two rows with the same natural key in one batch would make Postgres reject the
+            // whole statement ("ON CONFLICT DO UPDATE command cannot affect row a second
+            // time"), which would sink an otherwise-good device. Last one wins.
+            $unique = [];
+            foreach ($rows as $row) {
+                $unique[$row['device_id'].'|'.$row['username'].'|'.$row['caller_id']] = $row + ['swept_at' => $sweptAt];
             }
+            $unique = array_values($unique);
+
+            // Chunked so a pathologically large concentrator can't exceed Postgres's
+            // bound-parameter ceiling (65535 / 6 columns); a normal device is one statement.
+            foreach (array_chunk($unique, 1000) as $chunk) {
+                DB::table('pppoe_sessions')->upsert(
+                    $chunk,
+                    ['device_id', 'username', 'caller_id'],
+                    ['remote_address', 'uptime_seconds', 'swept_at'],
+                );
+            }
+
+            // Everything this device carries that the read did NOT return is a session that
+            // has gone away. Every row we just wrote carries exactly $sweptAt, so a strict
+            // less-than is precisely "not in this read".
+            DB::table('pppoe_sessions')
+                ->where('device_id', $deviceId)
+                ->where('swept_at', '<', $sweptAt)
+                ->delete();
         });
     }
 

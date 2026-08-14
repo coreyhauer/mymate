@@ -16,7 +16,10 @@ class PppoeSessionResource extends JsonResource
             'site_id' => $this->device?->site_id,
             'username' => $this->username,
             'remote_address' => $this->remote_address,
-            'caller_id' => $this->caller_id,
+            // Stored as '' (never NULL) so it can take part in the upsert's natural key - see
+            // the pppoe_sessions natural-key migration. Presented as null, which is what this
+            // endpoint has always emitted for a session with no caller-id.
+            'caller_id' => $this->caller_id === '' ? null : $this->caller_id,
             'uptime_seconds' => $this->uptime_seconds,
             'swept_at' => $this->swept_at,
         ];
