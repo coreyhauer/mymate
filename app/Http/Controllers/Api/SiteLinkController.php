@@ -24,30 +24,49 @@ class SiteLinkController extends Controller
      * geo/backhauls). Optional filters: `?site_id=` (either end), `?media_type=`,
      * `?confidence=` (exact `endpoint_confidence` match), and `?resolved=1` (both ends'
      * device ids are non-null).
+     *
+     * The response is capped at `?limit=` (default 5000, max 20000) purely as a backstop. The
+     * table is ~3k rows so the cap is not normally reached; it exists so that a registry that
+     * grows an order of magnitude cannot turn this endpoint into an unbounded materialisation
+     * of every row plus its resource. `meta.truncated` says when the cap actually bit.
      */
     public function index(Request $request): AnonymousResourceCollection
     {
+        // Declared so `?media_type[]=x` / `?confidence[]=x` are a 422 rather than an array
+        // reaching the query builder and 500ing on "Array to string conversion".
+        $validated = $request->validate([
+            'site_id' => ['nullable', 'integer'],
+            'media_type' => ['nullable', 'string'],
+            'confidence' => ['nullable', 'string'],
+            'resolved' => ['nullable', 'boolean'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:20000'],
+        ]);
+
         $query = SiteLink::query();
 
-        $siteId = $request->integer('site_id');
+        $siteId = (int) ($validated['site_id'] ?? 0);
         if ($siteId > 0) {
             $query->where(fn ($q) => $q->where('site_a_id', $siteId)->orWhere('site_b_id', $siteId));
         }
 
-        $mediaType = $request->query('media_type');
-        if ($mediaType !== null) {
-            $query->where('media_type', $mediaType);
+        if (isset($validated['media_type'])) {
+            $query->where('media_type', $validated['media_type']);
         }
 
-        $confidence = $request->query('confidence');
-        if ($confidence !== null) {
-            $query->where('endpoint_confidence', $confidence);
+        if (isset($validated['confidence'])) {
+            $query->where('endpoint_confidence', $validated['confidence']);
         }
 
         if ($request->boolean('resolved')) {
             $query->whereNotNull('device_a_id')->whereNotNull('device_b_id');
         }
 
-        return SiteLinkResource::collection($query->get());
+        $limit = (int) ($validated['limit'] ?? 5000);
+        // Fetch one extra to tell "exactly at the cap" from "more than the cap".
+        $links = $query->orderBy('id')->limit($limit + 1)->get();
+        $truncated = $links->count() > $limit;
+
+        return SiteLinkResource::collection($links->take($limit))
+            ->additional(['meta' => ['truncated' => $truncated, 'limit' => $limit]]);
     }
 }
