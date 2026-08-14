@@ -329,6 +329,28 @@ return [
             'timeout' => (int) env('MYMATE_IMPORT_JOB_TIMEOUT', 21600),
             'nice' => 0,
         ],
+
+        // PPPoE active-session sweeps: isolated so a fleet-wide sweep of ~2,300 concentrators
+        // can only ever delay itself, never throughput polling. Each job is one shard
+        // (~24 devices), each device an API login + a /ppp/active read - so the pool size is
+        // what actually bounds concurrent RouterOS sessions against the fleet. Rule of thumb:
+        // processes ~ (devices x p95_device_seconds) / stagger_seconds, i.e. 2300 x 0.8 / 240
+        // ~= 8. tries=1 (a missed sweep is corrected by the next 5-minute tick).
+        'supervisor-pppoe' => [
+            'connection' => 'redis',
+            'queue' => ['pppoe'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'size',
+            'maxProcesses' => (int) env('MYMATE_PPPOE_PROCESSES', 3),
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            // Match the job's own ceiling (mymate.pppoe.job_timeout) so the worker never kills
+            // a shard mid-sweep and leaves its overlap lock held.
+            'timeout' => (int) env('MYMATE_PPPOE_JOB_TIMEOUT', 300),
+            'nice' => 5, // yield to polling under contention
+        ],
     ],
 
     'environments' => [
@@ -341,6 +363,9 @@ return [
             'supervisor-backup' => ['maxProcesses' => 3],
             'supervisor-import' => ['maxProcesses' => 1],
             'supervisor-trace' => ['maxProcesses' => 3],
+            // ~8 concurrent sweeps clears ~2,300 concentrators inside the 240s stagger window;
+            // 10 leaves headroom for the slow tail (devices that burn the full connect timeout).
+            'supervisor-pppoe' => ['maxProcesses' => (int) env('MYMATE_PPPOE_PROCESSES', 10)],
         ],
 
         'local' => [
@@ -351,6 +376,7 @@ return [
             'supervisor-backup' => ['maxProcesses' => 1],
             'supervisor-import' => ['maxProcesses' => 1],
             'supervisor-trace' => ['maxProcesses' => 1],
+            'supervisor-pppoe' => ['maxProcesses' => 1],
         ],
     ],
 

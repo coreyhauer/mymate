@@ -420,6 +420,44 @@ return [
         'timeout' => (int) env('MYMATE_ROUTEROS_TIMEOUT', 3), // seconds
     ],
 
+    // PPPoE active-session sweep: read `/ppp/active` off every PPPoE concentrator on a slow
+    // cadence and materialise it into `pppoe_sessions` (App\Actions\Pppoe\SweepPppoeSessions,
+    // dispatched by App\Services\Pppoe\PppoeSweepDispatcher / `mymate:pppoe:sweep`).
+    // V1 is RouterOS-only: SNMP-polled concentrators are excluded because RouterOS publishes
+    // no active-PPPoE table over SNMP - see the dispatcher's docblock.
+    'pppoe' => [
+        // Master switch. Off = the scheduled command returns immediately (the table just goes
+        // stale, which the read API's swept_at makes visible rather than silent).
+        'enabled' => (bool) env('MYMATE_PPPOE_ENABLED', true),
+        // Which devices are concentrators. Matched case-insensitively against devices.name
+        // (ILIKE), because that is how this fleet is actually named. Change it here rather
+        // than in code if a deployment names them differently.
+        'name_filter' => env('MYMATE_PPPOE_NAME_FILTER', '%pppoe%'),
+        // Isolated Horizon queue (see config/horizon.php supervisor-pppoe) so a slow sweep can
+        // only ever delay itself - never polling, discovery or backups.
+        'queue' => env('MYMATE_PPPOE_QUEUE', 'pppoe'),
+        // Scale-out: the fleet is sharded into N batch jobs by crc32(device_id) % shards, same
+        // key as the poll dispatcher. ~2,300 concentrators / 96 shards = ~24 devices per job,
+        // which is a job that finishes in tens of seconds rather than minutes. Raise this AND
+        // MYMATE_PPPOE_PROCESSES together for a bigger fleet - job count must track shard
+        // count, never device count.
+        'shards' => (int) env('MYMATE_PPPOE_SHARDS', 96),
+        // Seconds to spread shard dispatch over (queue-side delay, not a sleep). Keeps the
+        // sweep a trickle instead of a 2,300-router thundering herd at t=0. Must stay
+        // comfortably below the 300s cadence so a cycle finishes before the next one starts.
+        'stagger_seconds' => (int) env('MYMATE_PPPOE_STAGGER_SECONDS', 240),
+        // Per-device RouterOS connect/read timeout (s). Higher than mymate.routeros.timeout (3)
+        // because a concentrator's /ppp/active is a far bigger read than a throughput tick, but
+        // still short enough that a black-holing device fails fast instead of wedging a worker.
+        'timeout' => (int) env('MYMATE_PPPOE_TIMEOUT', 5),
+        // Whole-job ceiling (s); mirrored by supervisor-pppoe's worker timeout and by the
+        // per-shard overlap lock's expireAfter, so a killed worker can't lock a shard out.
+        'job_timeout' => (int) env('MYMATE_PPPOE_JOB_TIMEOUT', 300),
+        // Sanity bound on rows accepted from one concentrator (real ones carry ~15-80). Hitting
+        // it logs loudly and truncates - never a silent partial write.
+        'max_sessions_per_device' => (int) env('MYMATE_PPPOE_MAX_SESSIONS', 4000),
+    ],
+
     // Firmware upgrades. Ordered upgrades wait for each device to
     // come back online before upgrading its parent, so the path upstream is never cut.
     'upgrade' => [
