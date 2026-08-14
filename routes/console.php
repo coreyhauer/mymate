@@ -74,6 +74,11 @@ Schedule::call(function () {
 // withoutOverlapping is belt-and-braces on top of the per-shard queue locks.
 Schedule::command('mymate:pppoe:sweep')->everyFiveMinutes()->name('pppoe-session-sweep')->withoutOverlapping();
 
+// OSPF adjacencies: delete rows for devices that stopped producing a successful read entirely
+// (unmonitored, credential pulled, OSPF removed). Dropped adjacencies are already pruned inline
+// by every poll, so this only catches devices that report nothing at all - hourly is ample.
+Schedule::command('mymate:ospf:reap')->hourly()->name('ospf-neighbor-reap')->withoutOverlapping();
+
 // Sonar ticket links: keep OPEN/PENDING tickets' cached subject/status/etc fresh without
 // anyone opening the device/site/link (closed tickets don't change, so they're skipped). A
 // no-op when Sonar isn't configured (mymate.sonar.enabled derives from the API token).

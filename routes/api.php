@@ -83,6 +83,11 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
     // wholesale-replaced per device). ?since= for deltas, ?device_id=/?username=/?q=, cursor-paginated.
     Route::get('pppoe-sessions', [\App\Http\Controllers\Api\PppoeSessionController::class, 'index'])->name('pppoe-sessions.index');
 
+    // Per-neighbour OSPF adjacency state, captured by the metrics poll (RouterOS publishes no
+    // OSPF-MIB over SNMP, so the API read is the only source). ?device_id=/?router_id=/?state=/
+    // ?full=0/?q=/?since=, cursor-paginated; rows nothing has refreshed lately are hidden.
+    Route::get('ospf-neighbors', [\App\Http\Controllers\Api\OspfNeighborController::class, 'index'])->name('ospf-neighbors.index');
+
     Route::get('geocode', [\App\Http\Controllers\Api\GeoController::class, 'geocode'])
         ->middleware('throttle:30,1')->name('geocode');
     // System status board (db/redis/workers/polling/websockets/backups) for Settings.

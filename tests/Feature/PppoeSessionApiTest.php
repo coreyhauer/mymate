@@ -138,6 +138,70 @@ class PppoeSessionApiTest extends TestCase
             ->assertJsonValidationErrors(['since']);
     }
 
+    public function test_stale_rows_are_hidden_by_default_and_revealed_on_request(): void
+    {
+        $device = Device::factory()->create();
+
+        // A concentrator that dropped out of the sweep - renamed, unmonitored, credential
+        // pulled. Its last sessions must not keep answering "these customers are online".
+        PppoeSession::create(['device_id' => $device->id, 'username' => 'long-gone', 'swept_at' => now()->subDay()]);
+        PppoeSession::create(['device_id' => $device->id, 'username' => 'current', 'swept_at' => now()]);
+
+        $this->getJson('/api/pppoe-sessions')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.username', 'current');
+
+        $this->getJson('/api/pppoe-sessions?stale=1')->assertOk()->assertJsonCount(2, 'data');
+        $this->getJson('/api/pppoe-sessions?max_age_minutes=0')->assertOk()->assertJsonCount(2, 'data');
+    }
+
+    public function test_array_params_are_rejected_rather_than_500ing(): void
+    {
+        $this->getJson('/api/pppoe-sessions?username[]=x')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['username']);
+
+        $this->getJson('/api/pppoe-sessions?q[]=x')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['q']);
+
+        $this->getJson('/api/pppoe-sessions?since[]=x')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['since']);
+    }
+
+    public function test_since_accepts_epoch_seconds_as_well_as_milliseconds(): void
+    {
+        $device = Device::factory()->create();
+        PppoeSession::create(['device_id' => $device->id, 'username' => 'current', 'swept_at' => now()]);
+
+        $this->getJson('/api/pppoe-sessions?since='.now()->subMinutes(5)->getTimestamp())
+            ->assertOk()
+            ->assertJsonCount(1, 'data');
+    }
+
+    public function test_an_out_of_range_epoch_is_a_422_not_a_500(): void
+    {
+        $this->getJson('/api/pppoe-sessions?since=99999999999999999999')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['since']);
+    }
+
+    public function test_q_treats_like_metacharacters_literally(): void
+    {
+        $device = Device::factory()->create();
+
+        PppoeSession::create(['device_id' => $device->id, 'username' => 'a_b', 'swept_at' => now()]);
+        PppoeSession::create(['device_id' => $device->id, 'username' => 'axb', 'swept_at' => now()]);
+
+        // Unescaped, `_` is "any single character" and this would also match axb.
+        $this->getJson('/api/pppoe-sessions?q=a_b')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.username', 'a_b');
+    }
+
     public function test_requires_authentication(): void
     {
         $this->app['auth']->forgetGuards();

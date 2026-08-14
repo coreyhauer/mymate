@@ -470,6 +470,23 @@ return [
         'reap_multiplier' => (int) env('MYMATE_PPPOE_REAP_MULTIPLIER', 8),
     ],
 
+    // OSPF adjacencies, captured per device by App\Actions\Polling\ReadOspf as a side-effect of
+    // the metrics poll it already runs - RouterOS exposes no OSPF-MIB over SNMP, so that API
+    // read is the only source of per-neighbour truth. See the ospf_neighbors migration and
+    // App\Http\Controllers\Api\OspfNeighborController.
+    'ospf' => [
+        // Persist the per-neighbour detail. Off = ReadOspf keeps returning the Full-neighbour
+        // count exactly as it always has and simply writes nothing - the pre-existing
+        // behaviour, and the kill switch if the write ever misbehaves on real gear.
+        'persist' => (bool) env('MYMATE_OSPF_PERSIST', true),
+        // Same staleness contract as PPPoE above. A device that stops being polled stops
+        // refreshing its rows, and a long-dead adjacency must never be served as a live one:
+        // the read API hides rows older than this by default, and `mymate:ospf:reap` deletes
+        // them past stale_after_minutes x reap_multiplier.
+        'stale_after_minutes' => (int) env('MYMATE_OSPF_STALE_AFTER_MINUTES', 30),
+        'reap_multiplier' => (int) env('MYMATE_OSPF_REAP_MULTIPLIER', 8),
+    ],
+
     // Firmware upgrades. Ordered upgrades wait for each device to
     // come back online before upgrading its parent, so the path upstream is never cut.
     'upgrade' => [
