@@ -147,12 +147,26 @@ class ReadOspf
             }
 
             // Anything this device carries that this read did not return is an adjacency that
-            // has gone away. Every row just written carries exactly $seenAt, so a strict
-            // less-than is precisely "not in this read".
-            DB::table('ospf_neighbors')
-                ->where('device_id', $deviceId)
-                ->where('last_seen_at', '<', $seenAt)
-                ->delete();
+            // has gone away. Matched on the natural key rather than on "last_seen_at older than
+            // this poll": two polls of one device landing inside the same second would leave the
+            // previous rows carrying the identical timestamp, and a time-based prune would then
+            // delete nothing. An empty read (every adjacency down) deletes them all, which is
+            // the whole point - see the docblock above.
+            $prune = DB::table('ospf_neighbors')->where('device_id', $deviceId);
+
+            if ($unique !== []) {
+                $pairs = array_map(
+                    static fn (array $r): array => [$r['router_id'], $r['neighbor_address']],
+                    $unique,
+                );
+                $placeholders = implode(',', array_fill(0, count($pairs), '(?,?)'));
+                $prune->whereRaw(
+                    "(router_id, neighbor_address) NOT IN ({$placeholders})",
+                    array_merge(...$pairs),
+                );
+            }
+
+            $prune->delete();
         });
     }
 

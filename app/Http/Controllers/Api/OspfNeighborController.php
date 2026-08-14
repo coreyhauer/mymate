@@ -5,12 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OspfNeighborResource;
 use App\Models\OspfNeighbor;
+use App\Support\SinceParam;
 use App\Support\SqlLike;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
-use Throwable;
 
 /**
  * Per-neighbour OSPF adjacency state (see the OspfNeighbor model), captured by the metrics poll
@@ -65,7 +64,7 @@ class OspfNeighborController extends Controller
         $query = OspfNeighbor::query()->with('device');
 
         if (isset($validated['since'])) {
-            $since = $this->parseSince($validated['since']);
+            $since = SinceParam::parse($validated['since']);
 
             if ($since === null) {
                 throw ValidationException::withMessages([
@@ -121,28 +120,4 @@ class OspfNeighborController extends Controller
         );
     }
 
-    /**
-     * Accepts ISO8601/RFC3339 strings and raw epoch timestamps given as a string, in either
-     * seconds or milliseconds - told apart by magnitude. Both branches sit inside the try:
-     * Carbon throws on an out-of-range epoch just as it does on an unparseable string, and
-     * that must be a 422, not a 500.
-     */
-    private function parseSince(string $value): ?Carbon
-    {
-        if ($value === '') {
-            return null;
-        }
-
-        try {
-            if (ctype_digit($value)) {
-                return strlen($value) > 11
-                    ? Carbon::createFromTimestampMs((int) $value)
-                    : Carbon::createFromTimestamp((int) $value);
-            }
-
-            return Carbon::parse($value);
-        } catch (Throwable) {
-            return null;
-        }
-    }
 }

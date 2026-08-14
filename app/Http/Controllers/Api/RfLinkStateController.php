@@ -5,9 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\RfLinkStateResource;
 use App\Models\RfLinkState;
+use App\Support\SinceParam;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Latest per-device RF/link-health state (see the RfLinkState model) - materialised from
@@ -30,7 +31,7 @@ class RfLinkStateController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         $validated = $request->validate([
-            'since' => ['nullable', 'date'],
+            'since' => ['nullable', 'string'],
             'device_id' => ['nullable', 'integer'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100000'],
         ]);
@@ -38,7 +39,20 @@ class RfLinkStateController extends Controller
         $query = RfLinkState::query();
 
         if (isset($validated['since'])) {
-            $query->where('synced_at', '>', Carbon::parse($validated['since']));
+            // Shared with the other ?since= endpoints so they cannot drift apart on what they
+            // accept. Notably this tolerates an ISO8601 offset whose "+" was not
+            // percent-encoded (query-string decoding turns it into a space), which the plain
+            // `date` rule rejected - a 422 for a perfectly well-formed timestamp, on an
+            // endpoint whose entire purpose is being polled.
+            $since = SinceParam::parse($validated['since']);
+
+            if ($since === null) {
+                throw ValidationException::withMessages([
+                    'since' => 'The since field must be a valid ISO8601 date/time or epoch timestamp.',
+                ]);
+            }
+
+            $query->where('synced_at', '>', $since);
         }
 
         $deviceId = (int) ($validated['device_id'] ?? 0);

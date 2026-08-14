@@ -5,12 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PppoeSessionResource;
 use App\Models\PppoeSession;
+use App\Support\SinceParam;
 use App\Support\SqlLike;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
-use Throwable;
 
 /**
  * Latest known PPPoE session state per concentrator (see the PppoeSession model) - reconciled
@@ -71,11 +70,11 @@ class PppoeSessionController extends Controller
         $query = PppoeSession::query()->with('device');
 
         if (isset($validated['since'])) {
-            $since = $this->parseSince($validated['since']);
+            $since = SinceParam::parse($validated['since']);
 
             if ($since === null) {
                 throw ValidationException::withMessages([
-                    'since' => 'The since field must be a valid ISO8601 date/time or epoch-ms timestamp.',
+                    'since' => 'The since field must be a valid ISO8601 date/time or epoch timestamp.',
                 ]);
             }
 
@@ -113,31 +112,5 @@ class PppoeSessionController extends Controller
         return PppoeSessionResource::collection(
             $query->orderByDesc('id')->cursorPaginate($perPage)
         );
-    }
-
-    /**
-     * Accepts ISO8601/RFC3339 strings and raw epoch timestamps given as a string, in either
-     * seconds or milliseconds - told apart by magnitude, since a 10-digit value cannot be a
-     * plausible millisecond timestamp (it would be 1970) and a 13-digit one cannot be seconds.
-     * Both branches are inside the try: Carbon throws on an out-of-range epoch just as it does
-     * on an unparseable string, and that must be a 422, not a 500.
-     */
-    private function parseSince(string $value): ?Carbon
-    {
-        if ($value === '') {
-            return null;
-        }
-
-        try {
-            if (ctype_digit($value)) {
-                return strlen($value) > 11
-                    ? Carbon::createFromTimestampMs((int) $value)
-                    : Carbon::createFromTimestamp((int) $value);
-            }
-
-            return Carbon::parse($value);
-        } catch (Throwable) {
-            return null;
-        }
     }
 }

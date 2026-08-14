@@ -228,12 +228,17 @@ class SweepPppoeSessions
                 );
             }
 
-            // Everything this device carries that the read did NOT return is a session that
-            // has gone away. Every row we just wrote carries exactly $sweptAt, so a strict
-            // less-than is precisely "not in this read".
+            // Everything this device carries that the read did NOT return is a session that has
+            // gone away. Matched on the natural key rather than on "swept_at older than this
+            // sweep": two sweeps of one device landing inside the same second (a manual run
+            // next to the scheduled one, or any test) would leave the previous rows carrying
+            // the identical timestamp, and a time-based prune would then delete nothing.
+            $pairs = array_map(static fn (array $r): array => [$r['username'], $r['caller_id']], $unique);
+            $placeholders = implode(',', array_fill(0, count($pairs), '(?,?)'));
+
             DB::table('pppoe_sessions')
                 ->where('device_id', $deviceId)
-                ->where('swept_at', '<', $sweptAt)
+                ->whereRaw("(username, caller_id) NOT IN ({$placeholders})", array_merge(...$pairs))
                 ->delete();
         });
     }
