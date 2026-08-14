@@ -65,12 +65,16 @@ class PppoeSweepDispatcher
         $count = count($byShard);
         $step = ($stagger && $window > 0 && $count > 1) ? $window / $count : 0.0;
 
+        // A targeted run (--device / --limit) is a manual one: it gets its own overlap-lock
+        // namespace so the scheduler holding that shard can't silently swallow it.
+        $manual = $limit !== null || $deviceId !== null;
+
         $i = 0;
         foreach ($byShard as $shard => $shardIds) {
             $delay = (int) round($i * $step);
             // PendingDispatch: ->delay() proxies onto the job and the dispatch itself happens
             // on destruct, so this stays the ordinary `Job::dispatch(...)` house form.
-            $pending = SweepPppoeSessionsBatchJob::dispatch((int) $shard, $shardIds);
+            $pending = SweepPppoeSessionsBatchJob::dispatch((int) $shard, $shardIds, $manual);
             if ($delay > 0) {
                 $pending->delay($delay);
             }
@@ -118,6 +122,16 @@ class PppoeSweepDispatcher
         }
 
         return $query->pluck('id')->map(fn ($id): int => (int) $id)->all();
+    }
+
+    /**
+     * How many devices a dispatch with these options WOULD cover, without dispatching - the
+     * `--dry-run` counterpart to dispatch(), sharing its exact selection so the two can never
+     * disagree.
+     */
+    public function wouldDispatch(?int $limit = null, ?int $deviceId = null): int
+    {
+        return count($this->concentratorIds($limit, $deviceId));
     }
 
     /**

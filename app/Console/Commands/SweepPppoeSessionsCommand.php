@@ -43,8 +43,22 @@ class SweepPppoeSessionsCommand extends Command
         $stagger = ! $this->option('now') && $deviceId === null && $limit === null;
 
         if ($this->option('dry-run')) {
+            // Report what THIS invocation would dispatch. Printing the whole-fleet count while
+            // the operator had asked for --device=1234 answered a question nobody asked, and
+            // made a canary look like it was about to sweep 2,300 routers.
             $fleet = $dispatcher->fleetSize();
-            $this->info("Fleet matching the PPPoE filter: {$fleet} concentrator(s). Nothing dispatched (--dry-run).");
+
+            if ($deviceId !== null) {
+                $matches = $dispatcher->wouldDispatch(null, $deviceId);
+                $this->info($matches === 1
+                    ? "Device {$deviceId} matches (monitored, centrally-polled, RouterOS). Nothing dispatched (--dry-run)."
+                    : "Device {$deviceId} does NOT match - it must be monitored, agent-less and poll_method=routeros. Nothing dispatched (--dry-run).");
+            } elseif ($limit !== null) {
+                $matches = $dispatcher->wouldDispatch($limit, null);
+                $this->info("Would dispatch {$matches} of {$fleet} concentrator(s) (--limit={$limit}). Nothing dispatched (--dry-run).");
+            } else {
+                $this->info("Fleet matching the PPPoE filter: {$fleet} concentrator(s). Nothing dispatched (--dry-run).");
+            }
 
             return self::SUCCESS;
         }

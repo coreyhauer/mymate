@@ -3,10 +3,10 @@
 namespace App\Jobs;
 
 use App\Actions\Pppoe\SweepPppoeSessions;
+use App\Jobs\Middleware\LoggedWithoutOverlapping;
 use App\Support\EngineLog;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Throwable;
 
 /**
@@ -33,8 +33,12 @@ class SweepPppoeSessionsBatchJob implements ShouldQueue
 
     public int $tries = 1;
 
-    /** @param  list<int>  $deviceIds */
-    public function __construct(public int $shard, public array $deviceIds)
+    /**
+     * @param  list<int>  $deviceIds
+     * @param  bool  $manual  a hand-run sweep (`mymate:pppoe:sweep --device=/--limit=`) rather
+     *                        than the scheduled fleet pass - see middleware()
+     */
+    public function __construct(public int $shard, public array $deviceIds, public bool $manual = false)
     {
         $this->onQueue((string) config('mymate.pppoe.queue', 'pppoe'));
     }
@@ -49,7 +53,30 @@ class SweepPppoeSessionsBatchJob implements ShouldQueue
     {
         $expire = max(60, (int) config('mymate.pppoe.job_timeout', 300));
 
-        return [(new WithoutOverlapping("pppoe-shard-{$this->shard}"))->dontRelease()->expireAfter($expire)];
+        // Manual runs get their OWN lock namespace. The overlap lock is keyed by shard, and a
+        // hand-run canary hashes onto whatever shard its device belongs to - so if the
+        // scheduler happened to be holding that shard, dontRelease() threw the operator's job
+        // away and printed "Queued 1 shard job(s)". The run looked like it had happened and had
+        // simply found nothing, which is the worst possible answer while diagnosing a
+        // concentrator. A manual run is small, targeted and rare; it can safely proceed
+        // alongside the scheduled pass (the per-device persist is transactional either way).
+        $key = $this->manual
+            ? 'pppoe-manual-'.$this->shard.'-'.md5(implode(',', $this->deviceIds))
+            : "pppoe-shard-{$this->shard}";
+
+        // LoggedWithoutOverlapping, not the stock middleware: dontRelease() discards a job in
+        // total silence, so a shard held out by a stale lock was indistinguishable from a shard
+        // full of concentrators with no sessions.
+        return [
+            (new LoggedWithoutOverlapping($key))
+                ->dontRelease()
+                ->expireAfter($expire)
+                ->withContext([
+                    'shard' => $this->shard,
+                    'devices' => count($this->deviceIds),
+                    'manual' => $this->manual,
+                ]),
+        ];
     }
 
     public function failed(Throwable $e): void
