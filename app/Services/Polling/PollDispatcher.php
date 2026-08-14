@@ -50,36 +50,92 @@ class PollDispatcher
         return true;
     }
 
+    /**
+     * How many shards to split $deviceCount into.
+     *
+     * `shards` is a fixed number, so on its own it lets batch size grow with the fleet
+     * forever - and a batch that outgrows its worker timeout does not degrade, it stops
+     * producing output entirely (both PollInterfaces and PollDeviceMetrics persist AFTER
+     * their device loop, so a job killed mid-loop writes nothing at all). That is how this
+     * box ran for ten days with 187-device batches, 206s of work and a 60s timeout,
+     * recording no throughput history whatsoever.
+     *
+     * So the configured shard count is a FLOOR and `devices_per_shard` is the TARGET average
+     * batch size; whichever demands more shards wins. Fleet growth now costs more jobs, never
+     * longer jobs.
+     *
+     * "Target average", not "ceiling": shards are crc32(device_id) % n, and a hash does not
+     * divide a fleet evenly. Production measured min 169 / max 204 against a mean of 187 at
+     * 128 shards - about +10% - and the skew is proportionally worse for small shard counts.
+     * So the shard count is over-provisioned by SKEW_HEADROOM and the real safety margin is
+     * `job_timeout`, which is sized against the worst case (a batch of nothing but PPPoE
+     * concentrators at ~2.3s/device), not against the average.
+     */
+    private const SKEW_HEADROOM = 1.25;
+
+    private function shardCount(int $deviceCount, string $prefix): int
+    {
+        $configured = max(1, (int) config($prefix.'.shards', config('mymate.poll.shards', 16)));
+        $perShard = max(1, (int) config($prefix.'.devices_per_shard', 32));
+
+        return max($configured, (int) ceil($deviceCount / $perShard * self::SKEW_HEADROOM));
+    }
+
+    /**
+     * The centrally-pollable fleet: monitored, agent-less, and carrying an actual
+     * throughput method. The one definition, shared by every dispatcher below so their
+     * shard maps cannot drift apart.
+     *
+     * Ping-only devices (poll_method=none) have no driver, so dispatching them would just
+     * throw and log a spurious `poll: device poll failed` every tick.
+     *
+     * @return list<int>
+     */
+    private function pollableIds(): array
+    {
+        return Device::where('monitored', true)
+            ->whereNull('agent_id') // agent-assigned devices are polled by their agent
+            ->whereIn('poll_method', PollMethod::throughputMethods())
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    /**
+     * Split ids into shards by crc32(device_id) % shards - the house key, stable per device
+     * for a given shard count.
+     *
+     * @param  list<int>  $ids
+     * @return array<int, list<int>>
+     */
+    private function byShard(array $ids, int $shards): array
+    {
+        $byShard = [];
+        foreach ($ids as $id) {
+            $byShard[crc32((string) $id) % $shards][] = $id;
+        }
+
+        return $byShard;
+    }
+
     /** @return int number of batch jobs dispatched (non-empty shards) */
     public function dispatch(): int
     {
-        $shards = max(1, (int) config('mymate.poll.shards', 16));
+        $ids = $this->pollableIds();
+        if ($ids === []) {
+            return 0;
+        }
+
+        $shards = $this->shardCount(count($ids), 'mymate.poll');
         if ($this->backpressured('poll', $shards)) {
             return 0;
         }
 
-        // The throughput driver is chosen per device by poll_method; a device with
-        // no/unreachable credential just fails fast and is isolated by the orchestrator.
-        // Only poll monitored devices (monitored=false -> paused/mock), and only those
-        // with an actual throughput method - ping-only devices (poll_method=none,
-        // ) have no driver, so dispatching them would just throw + log a
-        // spurious `poll: device poll failed` every tick, the exact noise this avoids.
-        $ids = Device::where('monitored', true)
-            ->whereNull('agent_id') // agent-assigned devices are polled by their agent
-            ->whereIn('poll_method', PollMethod::throughputMethods())
-            ->pluck('id');
-        if ($ids->isEmpty()) {
-            return 0;
-        }
+        $byShard = $this->byShard($ids, $shards);
 
-        /** @var array<int, list<int>> $byShard */
-        $byShard = [];
-        foreach ($ids as $id) {
-            $byShard[crc32((string) $id) % $shards][] = (int) $id;
-        }
-
+        $timeout = (int) config('mymate.poll.job_timeout', 120);
         foreach ($byShard as $shard => $shardIds) {
-            PollInterfacesBatchJob::dispatch($shard, $shardIds);
+            PollInterfacesBatchJob::dispatch($shard, $shardIds, $timeout);
         }
 
         return count($byShard);
@@ -94,27 +150,25 @@ class PollDispatcher
      */
     public function dispatchMetrics(): int
     {
-        $shards = max(1, (int) config('mymate.poll.shards', 16));
-        if ($this->backpressured('poll', $shards)) {
+        $ids = $this->pollableIds();
+        if ($ids === []) {
             return 0;
         }
 
-        $ids = Device::where('monitored', true)
-            ->whereNull('agent_id')
-            ->whereIn('poll_method', PollMethod::throughputMethods())
-            ->pluck('id');
-        if ($ids->isEmpty()) {
+        $shards = $this->shardCount(count($ids), 'mymate.device_metrics');
+        // Guarded on its OWN queue. This used to check `poll`, so a throughput backlog
+        // suppressed metrics dispatch entirely - metrics were silenced by a queue they no
+        // longer even run on, and OSPF (read inside the metrics batch) went with them.
+        if ($this->backpressured((string) config('mymate.device_metrics.queue', 'metrics'), $shards)) {
             return 0;
         }
 
-        /** @var array<int, list<int>> $byShard */
-        $byShard = [];
-        foreach ($ids as $id) {
-            $byShard[crc32((string) $id) % $shards][] = (int) $id;
-        }
+        $byShard = $this->byShard($ids, $shards);
 
+        $queue = (string) config('mymate.device_metrics.queue', 'metrics');
+        $timeout = (int) config('mymate.device_metrics.job_timeout', 120);
         foreach ($byShard as $shard => $shardIds) {
-            PollDeviceMetricsBatchJob::dispatch($shard, $shardIds);
+            PollDeviceMetricsBatchJob::dispatch($shard, $shardIds, $queue, $timeout);
         }
 
         return count($byShard);
@@ -132,24 +186,25 @@ class PollDispatcher
             return 0;
         }
 
-        $shards = max(1, (int) config('mymate.poll.shards', 16));
-
-        $ids = Device::where('monitored', true)
-            ->whereNull('agent_id')
-            ->whereIn('poll_method', PollMethod::throughputMethods())
-            ->pluck('id');
-        if ($ids->isEmpty()) {
+        $ids = $this->pollableIds();
+        if ($ids === []) {
             return 0;
         }
 
-        /** @var array<int, list<int>> $byShard */
-        $byShard = [];
-        foreach ($ids as $id) {
-            $byShard[crc32((string) $id) % $shards][] = (int) $id;
+        // Sensors ride the metrics lane (same cadence, same shape of work) and are
+        // backpressured with it - this had NO guard at all, so it could deepen a backlog
+        // the workers already could not drain.
+        $shards = $this->shardCount(count($ids), 'mymate.device_metrics');
+        if ($this->backpressured((string) config('mymate.device_metrics.queue', 'metrics'), $shards)) {
+            return 0;
         }
 
+        $byShard = $this->byShard($ids, $shards);
+
+        $queue = (string) config('mymate.device_metrics.queue', 'metrics');
+        $timeout = (int) config('mymate.device_metrics.job_timeout', 120);
         foreach ($byShard as $shard => $shardIds) {
-            PollSensorsBatchJob::dispatch($shard, $shardIds);
+            PollSensorsBatchJob::dispatch($shard, $shardIds, $queue, $timeout);
         }
 
         return count($byShard);

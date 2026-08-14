@@ -15,7 +15,7 @@ class PollDispatcherTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_metrics_dispatch_shards_pollable_devices_onto_the_poll_queue(): void
+    public function test_metrics_dispatch_shards_pollable_devices_onto_the_metrics_queue(): void
     {
         config(['mymate.poll.shards' => 4]);
         Queue::fake();
@@ -33,8 +33,10 @@ class PollDispatcherTest extends TestCase
 
         $dispatchedIds = $jobs->flatMap(fn (PollDeviceMetricsBatchJob $j) => $j->deviceIds)->sort()->values()->all();
         $this->assertSame($ids, $dispatchedIds);
+        // Metrics moved OFF the shared `poll` queue: riding it meant a throughput backlog
+        // silenced metrics entirely (and OSPF with them, since ReadOspf runs in this batch).
         foreach ($jobs as $job) {
-            $this->assertSame('poll', $job->queue);
+            $this->assertSame(config('mymate.device_metrics.queue', 'metrics'), $job->queue);
         }
     }
 
