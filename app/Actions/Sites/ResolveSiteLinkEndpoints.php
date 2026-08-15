@@ -108,7 +108,14 @@ class ResolveSiteLinkEndpoints
     private const SIXTY_GHZ_MARKERS = ['wave60', 'wave 60', 'gigabeam', 'af60', '60ghz', '60 ghz'];
 
     /** Glued form: `alpha2bravo` - both sides pure letters, no separator. The original, strictest pattern. */
-    private const PAIR_PATTERN = '/([a-z]{3,})2([a-z]{3,})/i';
+    // 2+ not 3+, so field abbreviations parse: 'bpraymond2lt' (lt = Lynn Thoen) previously did
+    // not match at all, so BP Raymond and Schmeling showed no backhauls. Safe HERE because this
+    // action only ever tests a token against the TWO sites of an already-known link - a 2-char
+    // token still has to match one of them (by name or by an operator-confirmed alias) or it is
+    // discarded. The same relaxation would NOT be safe in DeriveSiteLinksFromNaming, which
+    // searches all ~2,650 sites; that action instead admits a short token only when it exactly
+    // equals a known alias.
+    private const PAIR_PATTERN = '/([a-z]{2,})2([a-z]{2,})/i';
 
     /**
      * Spaced form: `alpha 2 bravo`. Tokens must START with a letter (so purely-numeric
@@ -126,6 +133,25 @@ class ResolveSiteLinkEndpoints
     private const ROLE_SUFFIX_PATTERN = '/^([a-z0-9]{4,})(?:ap|st)(?:v?\d{1,2})?$/i';
 
     /** A token shorter than this is never attempted against the fuzzy matcher - too easy to collide. */
+    /**
+     * site_id => [alias, ...]. The OTHER names a site is known by in the field, so a device can be
+     * matched to a site recorded under a different vocabulary. Austin is the case that exposed the
+     * need: the site is `403 2nd St NW` while every radio says "Austin", so `AustinFiber2 310Main`
+     * matched nothing and the link was never created.
+     *
+     * @var array<int, array<int, string>>
+     */
+    public static array $aliasBySite = [];
+
+    /** Load aliases once per run; both this action and DeriveSiteLinksFromNaming call it. */
+    public static function loadAliases(): void
+    {
+        self::$aliasBySite = [];
+        foreach (DB::table('site_aliases')->get(['site_id', 'alias']) as $a) {
+            self::$aliasBySite[(int) $a->site_id][] = (string) $a->alias;
+        }
+    }
+
     private const FUZZY_MIN_TOKEN_LEN = 4;
 
     /** A site name-word shorter than this is never indexed for fuzzy matching, for the same reason. */
@@ -144,6 +170,8 @@ class ResolveSiteLinkEndpoints
      */
     public function __invoke(?int $limit = null, bool $dryRun = false): array
     {
+        self::loadAliases();
+
         $sites = Site::query()->get(['id', 'name', 'latitude', 'longitude'])
             ->map(fn (Site $s): array => [
                 'id' => $s->id,
@@ -434,6 +462,18 @@ class ResolveSiteLinkEndpoints
         $fuzzy = self::fuzzyMatch($token, $fuzzyIndex);
         if ($fuzzy !== null && $fuzzy['site_id'] === $targetSiteId) {
             return ['method' => "fuzzy(d={$fuzzy['distance']})", 'matched' => $fuzzy['word'], 'weak' => true, 'role' => null];
+        }
+
+        // An alias counts exactly like the site's own name. Checked after the plain forms so it
+        // can never override a real match, only rescue one that would otherwise fail.
+        foreach (self::$aliasBySite[$targetSiteId] ?? [] as $alias) {
+            if (self::tokMatch($token, $alias)) {
+                return ['method' => 'alias', 'matched' => $alias, 'weak' => false, 'role' => null];
+            }
+            if ($stripped !== null && self::tokMatch($stripped, $alias)) {
+                return ['method' => 'alias+role_suffix', 'matched' => $alias, 'weak' => true,
+                    'role' => self::roleFromSuffix($token, $stripped)];
+            }
         }
 
         if ($stripped !== null) {
