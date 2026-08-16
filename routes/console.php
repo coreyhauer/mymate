@@ -66,6 +66,19 @@ Schedule::call(function () {
         ->update(['status' => AgentStatus::Offline]);
 })->everyMinute()->name('agent-reap-stale')->withoutOverlapping();
 
+// Recompute the RF health overlays, so a REPAIRED LINK CLEARS ITSELF from the map. Jake asked
+// "what happens after we fix a link - do we need to wait for the db to update for the lines to go
+// away?" and the answer was no: rf_link_state refreshes every 5 min but the DEFICIT derived from it
+// was only ever computed by hand, so a fixed link would have stayed red forever.
+// Hourly: cheap arithmetic over data already stored, and well inside the time it takes a tech to
+// climb down. LOS is NOT re-run here - terrain does not change hourly and each call builds a
+// profile; that runs once a day below.
+Schedule::command('mymate:rf:refresh')->hourly()->name('rf-deficit-refresh')->withoutOverlapping();
+
+// Line of sight for links that currently look bad. Daily is plenty - what changes is the link, not
+// the hillside. Runs after the nightly link derivation so newly discovered links get a verdict.
+Schedule::command('mymate:rf:refresh --los')->dailyAt('01:20')->name('rf-los-refresh')->withoutOverlapping();
+
 // PPPoE active sessions: sweep every concentrator's /ppp/active into `pppoe_sessions` so the
 // customer data plane ("who is online, on which concentrator, since when") is answerable
 // without touching a router. The command only queues sharded jobs onto the isolated `pppoe`
