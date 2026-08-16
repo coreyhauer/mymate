@@ -51,6 +51,10 @@ class DeriveSiteLinksFromNaming
      */
     public function handle(bool $dryRun = false): array
     {
+        // Aliases let a device match a site recorded under a different vocabulary (Austin vs
+        // '403 2nd St NW'). Without them the link simply never gets created - silently.
+        ResolveSiteLinkEndpoints::loadAliases();
+
         $sites = collect(DB::select('SELECT id, name, latitude, longitude FROM sites'));
 
         // buildFuzzyIndex wants each site pre-shaped as ['id' => int, 'words' => string[]],
@@ -68,6 +72,14 @@ class DeriveSiteLinksFromNaming
             $nnameById[$s->id] = ResolveSiteLinkEndpoints::normalize((string) $s->name);
             $siteById[$s->id] = $s;
         }
+
+        $knownAliases = [];
+        foreach (ResolveSiteLinkEndpoints::$aliasBySite as $list) {
+            foreach ($list as $a) {
+                $knownAliases[] = $a;
+            }
+        }
+        $knownAliases = array_values(array_unique($knownAliases));
 
         $devices = DB::select('SELECT id, name, site_id FROM devices WHERE site_id IS NOT NULL AND name IS NOT NULL');
 
@@ -89,8 +101,13 @@ class DeriveSiteLinksFromNaming
 
                 $other = ResolveSiteLinkEndpoints::normalize($pair['t2']);
                 $stripped = ResolveSiteLinkEndpoints::stripRoleSuffix($other);
+                // Tokens under 4 chars are normally dropped - they are far too ambiguous to
+                // match against ~2,650 site names. But a token that EXACTLY equals a known alias
+                // is not a guess, it is an operator-confirmed mapping, so let those through.
+                // This is what makes the field abbreviations usable: 'lt' (Lynn Thoen) is two
+                // characters, which is why BP Raymond and Schmeling showed no backhauls at all.
                 foreach (array_unique(array_filter([$other, $stripped])) as $tok) {
-                    if (strlen($tok) >= 4) {
+                    if (strlen($tok) >= 4 || in_array($tok, $knownAliases, true)) {
                         $claims[(int) $d->site_id][$tok] = $d;
                     }
                 }
@@ -111,8 +128,19 @@ class DeriveSiteLinksFromNaming
                 // Which sites could `$tok` mean? Guard 3: exactly one, or we skip.
                 $targets = [];
                 foreach ($nnameById as $sid => $nname) {
-                    if ($sid !== $siteA && ResolveSiteLinkEndpoints::tokMatch($tok, $nname)) {
+                    if ($sid === $siteA) {
+                        continue;
+                    }
+                    if (ResolveSiteLinkEndpoints::tokMatch($tok, $nname)) {
                         $targets[] = $sid;
+
+                        continue;
+                    }
+                    foreach (ResolveSiteLinkEndpoints::$aliasBySite[$sid] ?? [] as $alias) {
+                        if (ResolveSiteLinkEndpoints::tokMatch($tok, $alias)) {
+                            $targets[] = $sid;
+                            break;
+                        }
                     }
                 }
                 if ($targets === []) {
@@ -121,11 +149,15 @@ class DeriveSiteLinksFromNaming
 
                 // Guard 1: keep only targets that name US back.
                 $reciprocal = [];
+                $selfNames = array_merge([$nnameById[$siteA]],
+                    ResolveSiteLinkEndpoints::$aliasBySite[$siteA] ?? []);
                 foreach ($targets as $sid) {
                     foreach (($claims[$sid] ?? []) as $backTok => $devB) {
-                        if (ResolveSiteLinkEndpoints::tokMatch($backTok, $nnameById[$siteA])) {
-                            $reciprocal[$sid] = $devB;
-                            break;
+                        foreach ($selfNames as $selfName) {
+                            if (ResolveSiteLinkEndpoints::tokMatch($backTok, $selfName)) {
+                                $reciprocal[$sid] = $devB;
+                                break 2;
+                            }
                         }
                     }
                 }

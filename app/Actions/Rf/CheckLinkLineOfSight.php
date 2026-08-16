@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Http;
  */
 class CheckLinkLineOfSight
 {
+    /** Fallback only. Real heights come from sites.height_m (UISP has 2,727 of 2,735). */
     private const TOWER_M = 45.0;
     private const CPE_M = 9.0;
 
@@ -45,8 +46,8 @@ class CheckLinkLineOfSight
         $rows = DB::select('
             SELECT sl.id, sl.device_a_id, sl.device_b_id,
                    da.name AS a_name, db.name AS b_name,
-                   sa2.latitude AS a_lat, sa2.longitude AS a_lon,
-                   sb2.latitude AS b_lat, sb2.longitude AS b_lon,
+                   sa2.latitude AS a_lat, sa2.longitude AS a_lon, sa2.height_m AS a_h,
+                   sb2.latitude AS b_lat, sb2.longitude AS b_lon, sb2.height_m AS b_h,
                    GREATEST(COALESCE(ra.signal_deficit_db, -99), COALESCE(rb.signal_deficit_db, -99)) AS worst_deficit,
                    COALESCE(ra.distance_mi, rb.distance_mi) AS radio_km,
                    COALESCE(ra.freq_mhz, rb.freq_mhz) AS freq_mhz
@@ -96,9 +97,14 @@ class CheckLinkLineOfSight
                 }
             }
 
-            // (1) orient the heights from the ap/st role in each name
-            $aH = $this->heightFor((string) $r->a_name);
-            $bH = $this->heightFor((string) $r->b_name);
+            // (1) MEASURED height wins. Inferring it from the ap/st suffix is wrong whenever a
+            // TOWER-mounted radio is named "...ST" - which is normal for the station end of a
+            // tower-to-tower backhaul - and it invents obstructions that are not there.
+            // Charleston CCI <-> Easton GL was reported `los_only`/-2.8 m on that guess, and I
+            // wrongly concluded vegetation; with the real 30 m heights the same tool returns
+            // clear/+3.5 m/foliage 0.0.
+            $aH = $r->a_h !== null ? (float) $r->a_h : $this->heightFor((string) $r->a_name);
+            $bH = $r->b_h !== null ? (float) $r->b_h : $this->heightFor((string) $r->b_name);
             $freq = (float) ($r->freq_mhz ?: 5800);
             if ($freq < 1000) {
                 $freq *= 1000;
