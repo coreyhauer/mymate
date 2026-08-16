@@ -130,10 +130,12 @@ class RouterOsDeviceMetricsDriver implements DeviceMetricsDriver
         ] as $command) {
             try {
                 foreach ($conn->query($command) as $row) {
-                    // Only genuine registration rows: an unsupported path can come back as a
-                    // !trap the client library surfaces as a {message, category} row (seen live
-                    // 2026-08-16); a registration always carries the client's mac-address.
-                    if (! is_array($row) || ! isset($row['mac-address'])) {
+                    // Drop API !trap replies: an unsupported path (wifiwave2 / CAPsMAN on a
+                    // classic radio) comes back as a {message, category} row the client library
+                    // surfaces instead of throwing (seen live 2026-08-16). A trap is recognised
+                    // by its shape - a `message` and no `mac-address` - so a genuine (if sparse)
+                    // registration row still counts toward the client aggregate.
+                    if (! is_array($row) || (isset($row['message']) && ! isset($row['mac-address']))) {
                         continue;
                     }
                     $rows[] = $row;

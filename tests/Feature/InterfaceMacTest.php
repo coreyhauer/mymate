@@ -208,6 +208,24 @@ class InterfaceMacTest extends TestCase
             ->assertJsonPath('data.0.mac_addresses', []);
     }
 
+    /** Prod 2026-08-16: a DeviceResource built OUTSIDE index() (broadcast events, single-device
+     *  responses, other resources wrapping a device) must NOT lazy-load the interfaces relation
+     *  per device — that N+1 exhausted 1.5 GB fleet-wide. The key is simply absent there. */
+    public function test_device_resource_omits_mac_addresses_when_interfaces_not_eager_loaded(): void
+    {
+        $device = Device::factory()->create();
+        NetworkInterface::factory()->create(['device_id' => $device->id, 'if_index' => 1, 'mac_address' => 'aa:aa:aa:aa:aa:aa']);
+
+        $fresh = Device::query()->find($device->id); // no ->with('interfaces')
+        $this->assertFalse($fresh->relationLoaded('interfaces'));
+        $payload = (new \App\Http\Resources\DeviceResource($fresh))->resolve();
+        $this->assertArrayNotHasKey('mac_addresses', $payload);
+        $this->assertFalse($fresh->relationLoaded('interfaces'), 'resolving the resource must not lazy-load interfaces');
+
+        $loaded = Device::query()->with('interfaces:id,device_id,mac_address')->find($device->id);
+        $this->assertSame(['aa:aa:aa:aa:aa:aa'], (new \App\Http\Resources\DeviceResource($loaded))->resolve()['mac_addresses']);
+    }
+
     public function test_devices_index_eager_loads_interfaces_without_n_plus_one(): void
     {
         // A handful of devices each with a MAC-bearing interface. This isn't a strict query-count

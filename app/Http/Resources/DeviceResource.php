@@ -47,17 +47,19 @@ class DeviceResource extends JsonResource
             'vendor' => $this->vendor,
             'model' => $this->model,
             'serial' => $this->serial,
-            // Distinct non-empty interface MACs, sorted - the identity key that lets UISP
-            // (or anything else) match a MyMate device by hardware address instead of IP
-            // alone. `interfaces` is eager-loaded by the index() query so this doesn't cost
-            // an extra round trip per device across the whole fleet.
-            'mac_addresses' => $this->interfaces
+            // Distinct interface MACs — but ONLY when the caller eager-loaded `interfaces`
+            // (index() does, column-limited). Anywhere else (broadcast events, other resources
+            // wrapping a device) a bare `$this->interfaces` lazy-loads the FULL relation per
+            // device: on the first prod deploy (2026-08-16) that N+1 across ~200k interfaces
+            // exhausted 1.5 GB in a broadcast worker and in JSON responses. `whenLoaded` omits
+            // the key entirely when the relation isn't there — never a silent empty list.
+            'mac_addresses' => $this->whenLoaded('interfaces', fn () => $this->interfaces
                 ->pluck('mac_address')
                 ->filter(fn (?string $mac): bool => $mac !== null && $mac !== '')
                 ->unique()
                 ->sort()
                 ->values()
-                ->all(),
+                ->all()),
             'cpu' => $this->cpu,
             'ram_bytes' => $this->ram_bytes,
             'arch' => $this->arch,
