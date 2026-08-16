@@ -47,19 +47,24 @@ class DeviceResource extends JsonResource
             'vendor' => $this->vendor,
             'model' => $this->model,
             'serial' => $this->serial,
-            // Distinct interface MACs — but ONLY when the caller eager-loaded `interfaces`
-            // (index() does, column-limited). Anywhere else (broadcast events, other resources
-            // wrapping a device) a bare `$this->interfaces` lazy-loads the FULL relation per
-            // device: on the first prod deploy (2026-08-16) that N+1 across ~200k interfaces
-            // exhausted 1.5 GB in a broadcast worker and in JSON responses. `whenLoaded` omits
-            // the key entirely when the relation isn't there — never a silent empty list.
-            'mac_addresses' => $this->whenLoaded('interfaces', fn () => $this->interfaces
-                ->pluck('mac_address')
-                ->filter(fn (?string $mac): bool => $mac !== null && $mac !== '')
-                ->unique()
-                ->sort()
-                ->values()
-                ->all()),
+            // Distinct interface MACs. Emitted ONLY when the caller supplied them - either the
+            // fleet index() (one grouped SQL aggregate, attached as a plain attribute) or a
+            // caller that eager-loaded `interfaces`. Anywhere else (broadcast events, other
+            // resources wrapping a device) a bare `$this->interfaces` would lazy-load the FULL
+            // relation per device: on the first prod deploy (2026-08-16) that N+1 across ~200k
+            // interfaces exhausted 1.5 GB. Absent key, never a silent empty list.
+            'mac_addresses' => $this->when(
+                array_key_exists('mac_addresses', $this->resource->getAttributes()) || $this->resource->relationLoaded('interfaces'),
+                fn () => array_key_exists('mac_addresses', $this->resource->getAttributes())
+                    ? array_values((array) $this->resource->getAttribute('mac_addresses'))
+                    : $this->interfaces
+                        ->pluck('mac_address')
+                        ->filter(fn (?string $mac): bool => $mac !== null && $mac !== '')
+                        ->unique()
+                        ->sort()
+                        ->values()
+                        ->all()
+            ),
             'cpu' => $this->cpu,
             'ram_bytes' => $this->ram_bytes,
             'arch' => $this->arch,

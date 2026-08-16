@@ -17,6 +17,7 @@ use App\Http\Resources\DeviceResource;
 use App\Jobs\BulkUpgradeJob;
 use App\Jobs\UpgradeDeviceJob;
 use App\Models\Device;
+use App\Models\NetworkInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -27,12 +28,27 @@ class DeviceController extends Controller
     public function index(): AnonymousResourceCollection
     {
         // `site` is eager-loaded so DeviceResource can resolve inherited geo coordinates
-        // without an N+1 across the whole fleet. `interfaces:id,device_id,mac_address` is
-        // the same reasoning for `mac_addresses` - a column-limited eager load instead of
-        // one query per device.
-        return DeviceResource::collection(
-            Device::with(['parent', 'site', 'interfaces:id,device_id,mac_address'])->orderBy('name')->get()
-        );
+        // without an N+1 across the whole fleet.
+        $devices = Device::with(['parent', 'site'])->orderBy('name')->get();
+
+        // `mac_addresses`: ONE grouped query over the MAC-bearing interfaces (~10% of the
+        // table - PPPoE concentrators carry thousands of dynamic MAC-less pppoe-in rows),
+        // aggregated in Postgres, never hydrated as models. Eager-loading `interfaces` here
+        // hydrated the whole ~200k-row table behind this unpaginated fleet list and
+        // exhausted 1.5 GB on the first prod deploy (2026-08-16). Attached as a plain
+        // attribute the resource emits only when present (see DeviceResource).
+        $macsByDevice = NetworkInterface::query()
+            ->whereNotNull('mac_address')
+            ->where('mac_address', '<>', '')
+            ->groupBy('device_id')
+            ->selectRaw("device_id, string_agg(DISTINCT mac_address, ',' ORDER BY mac_address) AS macs")
+            ->pluck('macs', 'device_id');
+        foreach ($devices as $device) {
+            $macs = $macsByDevice->get($device->id);
+            $device->setAttribute('mac_addresses', $macs === null ? [] : explode(',', $macs));
+        }
+
+        return DeviceResource::collection($devices);
     }
 
     /**
