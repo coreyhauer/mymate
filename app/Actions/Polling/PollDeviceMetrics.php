@@ -22,6 +22,7 @@ class PollDeviceMetrics
     public function __construct(
         private DeviceMetricsDriverFactory $drivers,
         private ReadOspf $ospf,
+        private ReadWireless $wireless,
     ) {}
 
     /** @param  list<int>  $deviceIds */
@@ -79,6 +80,15 @@ class PollDeviceMetrics
                 $read = ($this->ospf)($device->mgmt_ip, $rosCred, (int) $device->id);
                 $ospf = $read['neighbors'];
                 $this->writeOspfCosts($device, $read['costs']);
+            }
+
+            // Wireless registration-table detail (per-client MAC/signal/rates), a side effect
+            // of the metrics poll RouterOsDeviceMetricsDriver already runs - see ReadWireless.
+            // V1 scope matches today's read site: only devices actually POLLED over the
+            // RouterOS API carry the raw rows on $metrics (an snmp-polled device with a
+            // routeros credential attached, as used for OSPF above, never populates them).
+            if ($device->poll_method === PollMethod::RouterOs) {
+                $this->wireless->persist((int) $device->id, $metrics->wirelessRegistrations);
             }
 
             if ($metrics->isEmpty() && $ospf === null && $metrics->freqMhz === null) {

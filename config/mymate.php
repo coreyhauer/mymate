@@ -187,6 +187,7 @@ return [
             'if_name' => '.1.3.6.1.2.1.31.1.1.1.1',
             'if_alias' => '.1.3.6.1.2.1.31.1.1.1.18', // operator-set port description (ifAlias)
             'if_high_speed' => '.1.3.6.1.2.1.31.1.1.1.15',
+            'if_phys_address' => '.1.3.6.1.2.1.2.2.1.6', // ifPhysAddress - hardware MAC per ifIndex
             'if_hc_in_octets' => '.1.3.6.1.2.1.31.1.1.1.6',
             'if_hc_out_octets' => '.1.3.6.1.2.1.31.1.1.1.10',
             'if_oper_status' => '.1.3.6.1.2.1.2.2.1.8', // ifOperStatus (1=up) - per-port up/down
@@ -525,6 +526,23 @@ return [
         // them past stale_after_minutes x reap_multiplier.
         'stale_after_minutes' => (int) env('MYMATE_OSPF_STALE_AFTER_MINUTES', 30),
         'reap_multiplier' => (int) env('MYMATE_OSPF_REAP_MULTIPLIER', 8),
+    ],
+
+    // Wireless registration-table clients, captured per device by App\Actions\Polling\ReadWireless
+    // as a side effect of the metrics poll App\Services\Polling\RouterOsDeviceMetricsDriver
+    // already runs. See the wireless_registrations migration and
+    // App\Http\Controllers\Api\WirelessRegistrationController.
+    'wireless' => [
+        // Persist the per-client detail. Off = the driver keeps returning the aggregate
+        // signal/SNR/CCQ/client-count exactly as it always has and simply writes nothing - the
+        // pre-existing behaviour, and the kill switch if the write ever misbehaves on real gear.
+        'persist' => (bool) env('MYMATE_WIRELESS_PERSIST', true),
+        // A radio that stops being polled stops refreshing its rows, and an empty read is
+        // treated as untrusted (see ReadWireless), so staleness is the only thing that ever
+        // ages a vanished client out: the read API hides rows older than this by default, and
+        // `mymate:wireless:reap` deletes them past stale_after_minutes x reap_multiplier.
+        'stale_after_minutes' => (int) env('MYMATE_WIRELESS_STALE_AFTER_MINUTES', 30),
+        'reap_multiplier' => (int) env('MYMATE_WIRELESS_REAP_MULTIPLIER', 4),
     ],
 
     // Firmware upgrades. Ordered upgrades wait for each device to

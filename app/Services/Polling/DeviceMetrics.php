@@ -27,6 +27,12 @@ class DeviceMetrics
         public readonly ?int $chanWidthMhz = null,
         public readonly ?int $freqBackupMhz = null,
         public readonly ?int $chanWidthBackupMhz = null,
+        // Raw wireless registration-table rows (RouterOS only - see
+        // RouterOsDeviceMetricsDriver::wireless()), passed through so
+        // App\Actions\Polling\PollDeviceMetrics can hand them to
+        // App\Actions\Polling\ReadWireless::persist() without a second device round trip. Not
+        // part of isEmpty()/the aggregate contract - purely a carrier for the raw detail.
+        public readonly array $wirelessRegistrations = [],
     ) {}
 
     /** True when nothing was read - the poller skips these so history has no fake zeroes. */

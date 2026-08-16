@@ -14,6 +14,15 @@ of commit subjects.
 ## [Unreleased]
 
 ### Added
+- **Wireless: persist per-client registration tables + read API.** Every metrics poll of a
+  RouterOS radio already reads its wireless registration table (signal/SNR/CCQ, averaged) and
+  threw the per-client rows away. Those rows - including the MAC that MyMate had never captured
+  anywhere - are now kept in `wireless_registrations` (best-effort union of the classic wireless,
+  wifiwave2, and CAPsMAN registration tables) and readable at `GET /api/wireless-registrations`
+  (`?device_id=`/`?mac=`/`?q=`/`?since=`/`?stale=`, cursor-paginated). An empty registration
+  table is treated as untrustworthy (PPPoE's rule, not OSPF's) so a black-holing radio never
+  wipes its own client list; `mymate:wireless:reap` (hourly) is the long-stop for a radio that
+  stops reporting entirely.
 - **Sites: place a whole tower at once.** A site is a physical location (tower, fiber
   cabinet, POP) that carries coordinates once; every device assigned to it inherits them on
   the geo map, so you no longer drag a pin per device. Manage them under `/api/sites`, or bulk

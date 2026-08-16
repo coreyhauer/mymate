@@ -88,6 +88,12 @@ Route::middleware(['auth:sanctum', RestrictWritesToAdmins::class])->group(functi
     // ?full=0/?q=/?since=, cursor-paginated; rows nothing has refreshed lately are hidden.
     Route::get('ospf-neighbors', [\App\Http\Controllers\Api\OspfNeighborController::class, 'index'])->name('ospf-neighbors.index');
 
+    // Per-client wireless registration-table state, captured by the metrics poll (one row per
+    // client AS SEEN ON one radio - the only place a device's associated MACs exist at all).
+    // ?device_id=/?mac=/?q=/?since=, cursor-paginated; rows nothing has refreshed lately are
+    // hidden.
+    Route::get('wireless-registrations', [\App\Http\Controllers\Api\WirelessRegistrationController::class, 'index'])->name('wireless-registrations.index');
+
     Route::get('geocode', [\App\Http\Controllers\Api\GeoController::class, 'geocode'])
         ->middleware('throttle:30,1')->name('geocode');
     // System status board (db/redis/workers/polling/websockets/backups) for Settings.

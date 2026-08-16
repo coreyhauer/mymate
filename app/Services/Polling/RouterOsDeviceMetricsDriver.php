@@ -55,6 +55,7 @@ class RouterOsDeviceMetricsDriver implements DeviceMetricsDriver
                 // OSPF (neighbours + interface costs) is read separately in PollDeviceMetrics via
                 // ReadOspf, so it works the same for a routeros-polled device and an snmp-polled
                 // one with a routeros credential attached.
+                wirelessRegistrations: $wl['rows'],
             );
         } finally {
             $conn->close();
@@ -64,21 +65,21 @@ class RouterOsDeviceMetricsDriver implements DeviceMetricsDriver
     /**
      * Wireless RF from the registration table: one row per associated station (an AP sees
      * its clients; a CPE in station mode sees the one AP). We report the client count and the
-     * average signal / SNR / CCQ across the rows. Best-effort - a board with no wireless (or
-     * running wifiwave2/CAPsMAN, a different path) just leaves these null.
+     * average signal / SNR / CCQ across the rows - this aggregate contract is UNCHANGED
+     * (DeviceResource depends on it) - and now ALSO return the raw rows so
+     * App\Actions\Polling\PollDeviceMetrics can persist per-client detail via
+     * App\Actions\Polling\ReadWireless without a second device round trip for the primary
+     * table. Best-effort - a board with no wireless just leaves the aggregate null and 'rows'
+     * empty.
      *
-     * @return array{signal:?float, snr:?float, ccq:?float, clients:?int}
+     * @return array{signal:?float, snr:?float, ccq:?float, clients:?int, rows: array<int, array<string, mixed>>}
      */
     private function wireless(\App\Services\RouterOs\RouterOsConnection $conn): array
     {
-        try {
-            $rows = $conn->query('/interface/wireless/registration-table/print');
-        } catch (\Throwable) {
-            return ['signal' => null, 'snr' => null, 'ccq' => null, 'clients' => null];
-        }
+        $rows = $this->registrationRows($conn);
 
         if ($rows === []) {
-            return ['signal' => null, 'snr' => null, 'ccq' => null, 'clients' => null];
+            return ['signal' => null, 'snr' => null, 'ccq' => null, 'clients' => null, 'rows' => []];
         }
 
         $signals = $snrs = $ccqs = [];
@@ -105,7 +106,39 @@ class RouterOsDeviceMetricsDriver implements DeviceMetricsDriver
             'snr' => $avg($snrs),
             'ccq' => $avg($ccqs),
             'clients' => count($rows),
+            'rows' => $rows,
         ];
+    }
+
+    /**
+     * Best-effort union of every registration-table RouterOS can expose: the classic wireless
+     * package, wifiwave2's `/interface/wifi/...`, and CAPsMAN's `/caps-man/...`. A board only
+     * ever populates one of these (a CAPsMAN controller managing local APs can populate two),
+     * so this just collects whatever exists rather than needing to know which the board runs.
+     * Each command is independently best-effort - one RouterOS doesn't recognise just
+     * contributes nothing, same as the single-command read this replaces.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function registrationRows(\App\Services\RouterOs\RouterOsConnection $conn): array
+    {
+        $rows = [];
+        foreach ([
+            '/interface/wireless/registration-table/print',
+            '/interface/wifi/registration-table/print',
+            '/caps-man/registration-table/print',
+        ] as $command) {
+            try {
+                foreach ($conn->query($command) as $row) {
+                    $rows[] = $row;
+                }
+            } catch (\Throwable) {
+                // Not this board's path (or this RouterOS version doesn't have it) - contribute
+                // nothing and try the next one.
+            }
+        }
+
+        return $rows;
     }
 
     /** First signed/decimal number in a value (e.g. "-65dBm@6Mbps" -> -65.0), or null. */

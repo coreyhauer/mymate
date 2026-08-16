@@ -92,6 +92,12 @@ Schedule::command('mymate:pppoe:sweep')->everyFiveMinutes()->name('pppoe-session
 // by every poll, so this only catches devices that report nothing at all - hourly is ample.
 Schedule::command('mymate:ospf:reap')->hourly()->name('ospf-neighbor-reap')->withoutOverlapping();
 
+// Wireless registration-table clients: delete rows for radios that stopped producing a
+// non-empty successful read entirely (unmonitored, credential pulled, powered off). A departed
+// client is already pruned inline by every non-empty poll of its radio - this only catches
+// radios that never report again at all - hourly is ample.
+Schedule::command('mymate:wireless:reap')->hourly()->name('wireless-registration-reap')->withoutOverlapping();
+
 // Sonar ticket links: keep OPEN/PENDING tickets' cached subject/status/etc fresh without
 // anyone opening the device/site/link (closed tickets don't change, so they're skipped). A
 // no-op when Sonar isn't configured (mymate.sonar.enabled derives from the API token).
