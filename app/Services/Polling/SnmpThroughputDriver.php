@@ -6,11 +6,14 @@ use App\Models\Device;
 use App\Services\Snmp\SnmpClient;
 use App\Services\Snmp\SnmpClientException;
 use App\Services\Snmp\SnmpCredential;
+use App\Support\MacAddress;
 
 /**
  * Throughput via SNMP v2c, 64-bit ifXTable counters.
  *
- * discover(): ifName (fallback ifDescr) + ifHighSpeed (Mbps capacity).
+ * discover(): ifName (fallback ifDescr) + ifHighSpeed (Mbps capacity) + ifPhysAddress
+ *             (hardware MAC, normalised via {@see MacAddress} - best-effort, blank when
+ *             the agent doesn't answer it).
  * sample():   ifHCInOctets / ifHCOutOctets - raw counters; the delta math + the
  *             counter-reset guard live in RateCalculator, applied by the action.
  *
@@ -33,6 +36,8 @@ class SnmpThroughputDriver implements ThroughputDriver
         $speeds = $this->snmp->walk($host, $community, $oids['if_high_speed']);
         // ifAlias = the operator-set port description (best-effort; empty on most ports).
         $aliases = isset($oids['if_alias']) ? $this->snmp->walk($host, $community, $oids['if_alias']) : [];
+        // ifPhysAddress = the hardware MAC (best-effort; some agents/interfaces don't answer it).
+        $macs = isset($oids['if_phys_address']) ? $this->snmp->walk($host, $community, $oids['if_phys_address']) : [];
 
         $interfaces = [];
         foreach ($names as $index => $name) {
@@ -49,6 +54,7 @@ class SnmpThroughputDriver implements ThroughputDriver
                 'name' => $name,
                 'description' => $description !== '' ? $description : null,
                 'speed_mbps' => isset($speeds[$index]) ? (int) $speeds[$index] : null,
+                'mac_address' => isset($macs[$index]) ? MacAddress::normalize((string) $macs[$index]) : '',
             ];
         }
 

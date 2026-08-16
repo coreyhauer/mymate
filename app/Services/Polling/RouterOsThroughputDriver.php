@@ -7,12 +7,14 @@ use App\Services\RouterOs\RouterOsClient;
 use App\Services\RouterOs\RouterOsClientException;
 use App\Services\RouterOs\RouterOsConnection;
 use App\Services\RouterOs\RouterOsTarget;
+use App\Support\MacAddress;
 
 /**
  * Throughput via the RouterOS binary API (no SNMP needed).
  *
- * discover(): `/interface/print` (name + a stable index from `.id`) + capacity
- *             from `/interface/ethernet print` where available.
+ * discover(): `/interface/print` (name + a stable index from `.id` + `mac-address`,
+ *             normalised via {@see MacAddress}) + capacity from `/interface/ethernet
+ *             print` where available.
  * sample():   `/interface/monitor-traffic once` -> rx/tx **bits per second directly**
  *             (InterfaceSample::rates) - no counter state, no delta, no reset guard.
  *
@@ -44,6 +46,7 @@ class RouterOsThroughputDriver implements ThroughputDriver
                     'name' => $name,
                     'description' => $comment !== '' ? $comment : null,
                     'speed_mbps' => $speeds[$name] ?? null,
+                    'mac_address' => MacAddress::normalize($row['mac-address'] ?? null),
                 ];
             }
 

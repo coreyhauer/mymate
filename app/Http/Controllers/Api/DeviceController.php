@@ -27,8 +27,12 @@ class DeviceController extends Controller
     public function index(): AnonymousResourceCollection
     {
         // `site` is eager-loaded so DeviceResource can resolve inherited geo coordinates
-        // without an N+1 across the whole fleet.
-        return DeviceResource::collection(Device::with(['parent', 'site'])->orderBy('name')->get());
+        // without an N+1 across the whole fleet. `interfaces:id,device_id,mac_address` is
+        // the same reasoning for `mac_addresses` - a column-limited eager load instead of
+        // one query per device.
+        return DeviceResource::collection(
+            Device::with(['parent', 'site', 'interfaces:id,device_id,mac_address'])->orderBy('name')->get()
+        );
     }
 
     /**

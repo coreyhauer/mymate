@@ -14,6 +14,11 @@ of commit subjects.
 ## [Unreleased]
 
 ### Added
+- **Interfaces: capture MAC addresses; devices expose `mac_addresses`.** Interface discovery now
+  keeps each interface's MAC (RouterOS `/interface/print` `mac-address`, SNMP `ifPhysAddress`),
+  normalized to lowercase colon form (blank when absent/all-zero). `GET /api/devices` rows carry
+  `mac_addresses` (distinct, sorted) and `InterfaceResource` carries `mac_address` — the first MAC
+  channel MyMate has ever exported, so downstream registries can key on hardware identity.
 - **Wireless: persist per-client registration tables + read API.** Every metrics poll of a
   RouterOS radio already reads its wireless registration table (signal/SNR/CCQ, averaged) and
   threw the per-client rows away. Those rows - including the MAC that MyMate had never captured

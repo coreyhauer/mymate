@@ -10,7 +10,7 @@ use App\Support\EngineLog;
 /**
  * Discover a device's interfaces via its driver and upsert the `interfaces`
  * rows. Idempotent: keyed on (device_id, if_index), so re-running refreshes
- * names/capacity instead of duplicating. Returns the count discovered.
+ * names/capacity/MAC instead of duplicating. Returns the count discovered.
  */
 class DiscoverInterfaces
 {
@@ -46,6 +46,11 @@ class DiscoverInterfaces
             // Interface speed is read-only from SNMP: always write the
             // discovered capacity. Bandwidth overrides live on the link, not here.
             $interface->speed_mbps = $row['speed_mbps'];
+
+            // Hardware MAC, already normalised by the driver. Read-only from the device,
+            // same as speed - refreshed on every rediscovery (a port that swaps NICs picks
+            // up the new address; blank stays blank rather than sticking to a stale value).
+            $interface->mac_address = $row['mac_address'] ?? '';
 
             $interface->save();
         }

@@ -39,12 +39,13 @@ class SnmpThroughputDriverTest extends TestCase
         $snmp = new FakeSnmpClient;
         $snmp->walks[$this->oids['if_name']] = [1 => 'ether1', 2 => 'sfp-sfpplus1'];
         $snmp->walks[$this->oids['if_high_speed']] = [1 => '1000', 2 => '10000'];
+        $snmp->walks[$this->oids['if_phys_address']] = [1 => 'AA:BB:CC:DD:EE:FF'];
 
         $found = (new SnmpThroughputDriver($snmp))->discover($this->snmpDevice());
 
         $this->assertSame([
-            ['if_index' => 1, 'name' => 'ether1', 'description' => null, 'speed_mbps' => 1000],
-            ['if_index' => 2, 'name' => 'sfp-sfpplus1', 'description' => null, 'speed_mbps' => 10000],
+            ['if_index' => 1, 'name' => 'ether1', 'description' => null, 'speed_mbps' => 1000, 'mac_address' => 'aa:bb:cc:dd:ee:ff'],
+            ['if_index' => 2, 'name' => 'sfp-sfpplus1', 'description' => null, 'speed_mbps' => 10000, 'mac_address' => ''],
         ], $found);
     }
 
@@ -70,7 +71,7 @@ class SnmpThroughputDriverTest extends TestCase
 
         $found = (new SnmpThroughputDriver($snmp))->discover($this->snmpDevice());
 
-        $this->assertSame([['if_index' => 3, 'name' => 'Vlan-Trunk', 'description' => null, 'speed_mbps' => null]], $found);
+        $this->assertSame([['if_index' => 3, 'name' => 'Vlan-Trunk', 'description' => null, 'speed_mbps' => null, 'mac_address' => '']], $found);
     }
 
     public function test_sample_returns_hc_octet_counters_keyed_by_ifindex(): void

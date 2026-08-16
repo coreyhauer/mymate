@@ -47,6 +47,17 @@ class DeviceResource extends JsonResource
             'vendor' => $this->vendor,
             'model' => $this->model,
             'serial' => $this->serial,
+            // Distinct non-empty interface MACs, sorted - the identity key that lets UISP
+            // (or anything else) match a MyMate device by hardware address instead of IP
+            // alone. `interfaces` is eager-loaded by the index() query so this doesn't cost
+            // an extra round trip per device across the whole fleet.
+            'mac_addresses' => $this->interfaces
+                ->pluck('mac_address')
+                ->filter(fn (?string $mac): bool => $mac !== null && $mac !== '')
+                ->unique()
+                ->sort()
+                ->values()
+                ->all(),
             'cpu' => $this->cpu,
             'ram_bytes' => $this->ram_bytes,
             'arch' => $this->arch,

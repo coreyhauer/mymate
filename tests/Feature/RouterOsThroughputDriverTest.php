@@ -29,8 +29,8 @@ class RouterOsThroughputDriverTest extends TestCase
     {
         return new FakeRouterOsClient(replies: [
             '/interface/print' => [
-                ['.id' => '*1', 'name' => 'ether1', 'type' => 'ether'],
-                ['.id' => '*A', 'name' => 'ether2', 'type' => 'ether'], // hex A -> 10
+                ['.id' => '*1', 'name' => 'ether1', 'type' => 'ether', 'mac-address' => '48:8F:5A:12:34:56'],
+                ['.id' => '*A', 'name' => 'ether2', 'type' => 'ether', 'mac-address' => '00:00:00:00:00:00'], // hex A -> 10; no real MAC
             ],
             // print gives names; the negotiated rate comes from ethernet/monitor.
             '/interface/ethernet/print' => [
@@ -53,8 +53,8 @@ class RouterOsThroughputDriverTest extends TestCase
         $found = (new RouterOsThroughputDriver($this->fakeClient()))->discover($this->routerOsDevice());
 
         $this->assertSame([
-            ['if_index' => 1, 'name' => 'ether1', 'description' => null, 'speed_mbps' => 1000],
-            ['if_index' => 10, 'name' => 'ether2', 'description' => null, 'speed_mbps' => 10000],
+            ['if_index' => 1, 'name' => 'ether1', 'description' => null, 'speed_mbps' => 1000, 'mac_address' => '48:8f:5a:12:34:56'],
+            ['if_index' => 10, 'name' => 'ether2', 'description' => null, 'speed_mbps' => 10000, 'mac_address' => ''],
         ], $found);
     }
 
