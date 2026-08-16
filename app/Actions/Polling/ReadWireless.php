@@ -72,6 +72,15 @@ class ReadWireless
             $unique = [];
             foreach ($rows as $row) {
                 $shaped = self::shape($deviceId, $row, $seenAt);
+                // A row with no usable MAC is not a registration. Seen live 2026-08-16: a
+                // registration-table path a board does not have (wifiwave2 / CAPsMAN on a
+                // classic-wireless radio) answers with an API !trap that the client library
+                // surfaces as a plain row ({message, category}) rather than throwing - which
+                // shaped to mac_address '' and, keyed by '', left ONE junk row per device.
+                // Skip it here (belt) and in the driver (braces); never persist a blank key.
+                if ($shaped['mac_address'] === '') {
+                    continue;
+                }
                 // Two rows on the same natural key in one batch would make Postgres reject the
                 // whole statement ("ON CONFLICT DO UPDATE command cannot affect row a second
                 // time") and sink an otherwise-good device (e.g. the same client showing up in
@@ -79,6 +88,11 @@ class ReadWireless
                 $unique[$shaped['mac_address']] = $shaped;
             }
             $unique = array_values($unique);
+            if ($unique === []) {
+                // Every row was junk (see above) - indistinguishable from an empty read, and an
+                // empty read is untrusted (PPPoE's rule): keep what we had, prune nothing.
+                return;
+            }
 
             foreach (array_chunk($unique, 500) as $chunk) {
                 DB::table('wireless_registrations')->upsert(

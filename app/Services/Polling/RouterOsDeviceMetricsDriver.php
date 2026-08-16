@@ -130,6 +130,12 @@ class RouterOsDeviceMetricsDriver implements DeviceMetricsDriver
         ] as $command) {
             try {
                 foreach ($conn->query($command) as $row) {
+                    // Only genuine registration rows: an unsupported path can come back as a
+                    // !trap the client library surfaces as a {message, category} row (seen live
+                    // 2026-08-16); a registration always carries the client's mac-address.
+                    if (! is_array($row) || ! isset($row['mac-address'])) {
+                        continue;
+                    }
                     $rows[] = $row;
                 }
             } catch (\Throwable) {

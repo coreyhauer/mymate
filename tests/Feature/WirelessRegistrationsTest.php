@@ -41,6 +41,28 @@ class WirelessRegistrationsTest extends TestCase
     // persist()
     // ------------------------------------------------------------------
 
+    /** Live 2026-08-16: an unsupported registration path answers with an API !trap the client
+     *  library surfaces as a plain {message, category} row. It must never become a row keyed
+     *  by mac_address '' - and an all-junk batch must not prune the device's real rows. */
+    public function test_persist_skips_rows_without_a_mac_and_never_prunes_on_an_all_junk_batch(): void
+    {
+        $device = Device::factory()->create();
+
+        app(ReadWireless::class)->persist($device->id, [
+            ['interface' => 'wlan1', 'mac-address' => 'AA:BB:CC:DD:EE:01', 'signal-strength' => '-60'],
+            ['message' => 'no such command prefix', 'category' => 0],
+        ]);
+        $this->assertSame(1, WirelessRegistration::where('device_id', $device->id)->count());
+        $this->assertSame(0, WirelessRegistration::where('mac_address', '')->count());
+
+        // A batch that is ONLY junk: keep the real row, prune nothing.
+        app(ReadWireless::class)->persist($device->id, [
+            ['message' => 'no such command prefix', 'category' => 0],
+        ]);
+        $this->assertSame(1, WirelessRegistration::where('device_id', $device->id)->count());
+        $this->assertSame('aa:bb:cc:dd:ee:01', WirelessRegistration::where('device_id', $device->id)->value('mac_address'));
+    }
+
     public function test_persist_inserts_shaped_rows(): void
     {
         $device = Device::factory()->create();
