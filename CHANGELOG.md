@@ -24,10 +24,16 @@ of commit subjects.
   threw the per-client rows away. Those rows - including the MAC that MyMate had never captured
   anywhere - are now kept in `wireless_registrations` (best-effort union of the classic wireless,
   wifiwave2, and CAPsMAN registration tables) and readable at `GET /api/wireless-registrations`
-  (`?device_id=`/`?mac=`/`?q=`/`?since=`/`?stale=`, cursor-paginated). An empty registration
-  table is treated as untrustworthy (PPPoE's rule, not OSPF's) so a black-holing radio never
-  wipes its own client list; `mymate:wireless:reap` (hourly) is the long-stop for a radio that
-  stops reporting entirely.
+  (`?device_id=`/`?mac=`/`?q=`/`?since=`/`?stale=`/`?max_age_minutes=`, cursor-paginated). An
+  empty registration table is treated as untrustworthy (PPPoE's rule, not OSPF's) so a
+  black-holing radio never wipes its own client list. Freshness is a QUERY filter, not a storage
+  policy: rows older than `MYMATE_WIRELESS_STALE_AFTER_MINUTES` (30) are hidden by default, but
+  every row also carries `first_seen_at`/`last_seen_at` and is kept until
+  `MYMATE_WIRELESS_RETENTION_DAYS` (90) - so `?max_age_minutes=0` (or `?stale=1`) answers
+  "which AP has this MAC been seen on, and when" long after the client stopped being current.
+  `mymate:wireless:reap` (hourly) enforces that retention horizon and nothing else - it used to
+  delete on a multiple of the freshness window, which on a sharded metrics lane dropped healthy
+  radios' client lists simply because the poller reached them late.
 - **Sites: place a whole tower at once.** A site is a physical location (tower, fiber
   cabinet, POP) that carries coordinates once; every device assigned to it inherits them on
   the geo map, so you no longer drag a pin per device. Manage them under `/api/sites`, or bulk

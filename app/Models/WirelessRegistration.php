@@ -19,7 +19,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * unlike OSPF, is treated as untrusted (PPPoE's rule, not OSPF's) and prunes nothing - see
  * ReadWireless::persist. `first_seen_at` is set once and never overwritten by the upsert;
  * `last_seen_at` is stamped when the writing transaction commits, and is what the read API's
- * default freshness filter and `mymate:wireless:reap` key off.
+ * default freshness filter and `mymate:wireless:reap` key off - but on two different horizons:
+ * freshness is a QUERY filter (`mymate.wireless.stale_after_minutes`, overridable per request),
+ * lifetime is `mymate.wireless.retention_days` (default 90). The latest observation of a pair
+ * is therefore kept, with its date, long after it stops being "current".
  *
  * `interface` and `mac_address` are stored as '' rather than NULL (mac_address takes part in a
  * unique index, and a NULL never conflicts); WirelessRegistrationResource presents them as null.

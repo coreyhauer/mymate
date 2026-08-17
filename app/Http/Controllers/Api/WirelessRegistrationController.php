@@ -26,8 +26,14 @@ use Illuminate\Validation\ValidationException;
  * ReadWireless - not even a radio that has genuinely gone client-less prunes its own rows) a
  * long-vanished client must never be served as a live one. Rows whose `last_seen_at` is older
  * than `mymate.wireless.stale_after_minutes` (default 30) are hidden BY DEFAULT; pass `?stale=1`
- * to include them, or `?max_age_minutes=` to pick your own horizon (0 = no filter).
- * `last_seen_at` is on every row regardless.
+ * to include them, or `?max_age_minutes=` to pick your own horizon (0 = no filter, the same
+ * thing `?stale=1` means - the convention PppoeSessionController already uses).
+ * `first_seen_at` / `last_seen_at` are on every row regardless.
+ *
+ * Freshness is a FILTER, not a storage policy: hiding a row here does not delete it. Rows live
+ * until `mymate.wireless.retention_days` (default 90, `mymate:wireless:reap`), so a caller that
+ * wants history - "which AP has this MAC been seen on, and when" - asks for it with
+ * `?max_age_minutes=0` and ranks on `last_seen_at`.
  *
  * DELTAS (`?since=`) take an ISO8601/RFC3339 string or a raw epoch timestamp in seconds or
  * milliseconds, and narrow to rows seen after it. Same overlap advice as OspfNeighborController:

@@ -95,7 +95,10 @@ Schedule::command('mymate:ospf:reap')->hourly()->name('ospf-neighbor-reap')->wit
 // Wireless registration-table clients: delete rows for radios that stopped producing a
 // non-empty successful read entirely (unmonitored, credential pulled, powered off). A departed
 // client is already pruned inline by every non-empty poll of its radio - this only catches
-// radios that never report again at all - hourly is ample.
+// radios that never report again at all. The cutoff is RETENTION
+// (mymate.wireless.retention_days, default 90d), not staleness: the metrics lane can leave a
+// healthy AP unvisited for hours, and a freshness-derived cutoff deleted those radios' clients
+// for being polled late. Hourly is ample for a horizon measured in days.
 Schedule::command('mymate:wireless:reap')->hourly()->name('wireless-registration-reap')->withoutOverlapping();
 
 // Sonar ticket links: keep OPEN/PENDING tickets' cached subject/status/etc fresh without
