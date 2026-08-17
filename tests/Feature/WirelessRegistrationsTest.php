@@ -256,6 +256,124 @@ class WirelessRegistrationsTest extends TestCase
         $this->getJson('/api/wireless-registrations?max_age_minutes=0')->assertOk()->assertJsonCount(2, 'data');
     }
 
+    /** The horizon a history consumer actually asks for: "seen in the last 24h" must include
+     *  a row the 30-minute default hides, and exclude one just the other side of it. */
+    public function test_max_age_minutes_picks_its_own_horizon(): void
+    {
+        $device = Device::factory()->create();
+
+        WirelessRegistration::create([
+            'device_id' => $device->id, 'mac_address' => 'aa:bb:cc:dd:ee:01',
+            'first_seen_at' => now()->subDays(3), 'last_seen_at' => now()->subHours(6),
+        ]);
+        WirelessRegistration::create([
+            'device_id' => $device->id, 'mac_address' => 'aa:bb:cc:dd:ee:02',
+            'first_seen_at' => now()->subDays(9), 'last_seen_at' => now()->subDays(2),
+        ]);
+
+        // Default (30 min) hides both.
+        $this->getJson('/api/wireless-registrations')->assertOk()->assertJsonCount(0, 'data');
+
+        // 24h keeps the 6-hour-old one only.
+        $this->getJson('/api/wireless-registrations?max_age_minutes=1440')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.mac_address', 'aa:bb:cc:dd:ee:01');
+
+        // 0 = no age filter at all: history, newest first.
+        $this->getJson('/api/wireless-registrations?max_age_minutes=0')->assertOk()->assertJsonCount(2, 'data');
+    }
+
+    public function test_rows_expose_first_seen_at_alongside_last_seen_at(): void
+    {
+        $device = Device::factory()->create();
+        WirelessRegistration::create([
+            'device_id' => $device->id, 'mac_address' => 'aa:bb:cc:dd:ee:01',
+            'first_seen_at' => now()->subDays(5), 'last_seen_at' => now(),
+        ]);
+
+        $row = $this->getJson('/api/wireless-registrations')->assertOk()->json('data.0');
+
+        $this->assertNotNull($row['first_seen_at']);
+        $this->assertNotNull($row['last_seen_at']);
+        $this->assertTrue(strtotime($row['first_seen_at']) < strtotime($row['last_seen_at']));
+    }
+
+    public function test_max_age_minutes_must_be_a_non_negative_integer(): void
+    {
+        $this->getJson('/api/wireless-registrations?max_age_minutes=-1')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['max_age_minutes']);
+
+        $this->getJson('/api/wireless-registrations?max_age_minutes=nope')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['max_age_minutes']);
+    }
+
+    // ------------------------------------------------------------------
+    // mymate:wireless:reap - RETENTION, not staleness
+    // ------------------------------------------------------------------
+
+    /** The 2026-08-17 regression: the reaper used to delete anything past
+     *  stale_after_minutes x reap_multiplier (2 h), which on a sharded metrics lane deleted
+     *  healthy radios' client lists for being polled late. Only genuinely old rows may go. */
+    public function test_reap_keeps_rows_the_poller_was_merely_late_to_and_deletes_only_past_retention(): void
+    {
+        $device = Device::factory()->create();
+
+        $late = WirelessRegistration::create([
+            'device_id' => $device->id, 'mac_address' => 'aa:bb:cc:dd:ee:01',
+            'first_seen_at' => now()->subDays(30), 'last_seen_at' => now()->subHours(3),
+        ]);
+        $yesterday = WirelessRegistration::create([
+            'device_id' => $device->id, 'mac_address' => 'aa:bb:cc:dd:ee:02',
+            'first_seen_at' => now()->subDays(30), 'last_seen_at' => now()->subDay(),
+        ]);
+        $ancient = WirelessRegistration::create([
+            'device_id' => $device->id, 'mac_address' => 'aa:bb:cc:dd:ee:03',
+            'first_seen_at' => now()->subDays(200), 'last_seen_at' => now()->subDays(120),
+        ]);
+
+        $this->artisan('mymate:wireless:reap')->assertSuccessful();
+
+        $this->assertDatabaseHas('wireless_registrations', ['id' => $late->id]);
+        $this->assertDatabaseHas('wireless_registrations', ['id' => $yesterday->id]);
+        $this->assertDatabaseMissing('wireless_registrations', ['id' => $ancient->id]);
+    }
+
+    public function test_reap_horizon_follows_retention_days(): void
+    {
+        config(['mymate.wireless.retention_days' => 7]);
+        $device = Device::factory()->create();
+
+        $inside = WirelessRegistration::create([
+            'device_id' => $device->id, 'mac_address' => 'aa:bb:cc:dd:ee:01',
+            'first_seen_at' => now()->subDays(30), 'last_seen_at' => now()->subDays(6),
+        ]);
+        $outside = WirelessRegistration::create([
+            'device_id' => $device->id, 'mac_address' => 'aa:bb:cc:dd:ee:02',
+            'first_seen_at' => now()->subDays(30), 'last_seen_at' => now()->subDays(8),
+        ]);
+
+        $this->artisan('mymate:wireless:reap')->assertSuccessful();
+
+        $this->assertDatabaseHas('wireless_registrations', ['id' => $inside->id]);
+        $this->assertDatabaseMissing('wireless_registrations', ['id' => $outside->id]);
+    }
+
+    public function test_reap_dry_run_deletes_nothing(): void
+    {
+        $device = Device::factory()->create();
+        $ancient = WirelessRegistration::create([
+            'device_id' => $device->id, 'mac_address' => 'aa:bb:cc:dd:ee:03',
+            'first_seen_at' => now()->subDays(400), 'last_seen_at' => now()->subDays(365),
+        ]);
+
+        $this->artisan('mymate:wireless:reap', ['--dry-run' => true])->assertSuccessful();
+
+        $this->assertDatabaseHas('wireless_registrations', ['id' => $ancient->id]);
+    }
+
     public function test_mac_filter_normalizes_the_query_value(): void
     {
         $device = Device::factory()->create();

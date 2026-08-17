@@ -109,6 +109,8 @@ worth knowing about:
 | `MYMATE_DISCOVERY_SCAN_INTERVAL` | `3600` | Default per subnet scan cadence, overridable per subnet |
 | `MYMATE_DISCOVERY_MAX_HOSTS` | `4096` | Most hosts expanded from one subnet, a safety cap |
 | `MYMATE_HISTORY_RETENTION_DAYS` | `14` | How many days of history to keep |
+| `MYMATE_WIRELESS_STALE_AFTER_MINUTES` | `30` | How old a wireless client row may be and still count as current, the read API's default filter, nothing is deleted on this horizon |
+| `MYMATE_WIRELESS_RETENTION_DAYS` | `90` | How long a wireless client row is kept before `mymate:wireless:reap` deletes it |
 | `MYMATE_SNMP_TIMEOUT_US` | `1000000` | SNMP timeout in microseconds, kept short to fail fast |
 | `MYMATE_LOG_LEVEL` | `info` | Set to `debug` for per tick heartbeats |
 

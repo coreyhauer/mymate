@@ -537,11 +537,23 @@ return [
         // signal/SNR/CCQ/client-count exactly as it always has and simply writes nothing - the
         // pre-existing behaviour, and the kill switch if the write ever misbehaves on real gear.
         'persist' => (bool) env('MYMATE_WIRELESS_PERSIST', true),
-        // A radio that stops being polled stops refreshing its rows, and an empty read is
-        // treated as untrusted (see ReadWireless), so staleness is the only thing that ever
-        // ages a vanished client out: the read API hides rows older than this by default, and
-        // `mymate:wireless:reap` deletes them past stale_after_minutes x reap_multiplier.
+        // FRESHNESS, not lifetime. A radio that stops being polled stops refreshing its rows,
+        // and an empty read is untrusted (see ReadWireless), so this is what keeps a
+        // long-vanished client from being served as a live one: the read API hides rows older
+        // than this BY DEFAULT. It is a query filter only - nothing is deleted on this horizon.
+        // A caller that wants history passes `?max_age_minutes=` (0 = no filter) or `?stale=1`.
         'stale_after_minutes' => (int) env('MYMATE_WIRELESS_STALE_AFTER_MINUTES', 30),
+        // LIFETIME. How long the latest observation of a (device, client) pair is kept before
+        // `mymate:wireless:reap` deletes it - the only thing that ever removes a row a poll
+        // did not prune inline. Deliberately far longer than any polling cadence: the metrics
+        // lane is sharded and a busy install can leave a healthy AP unvisited for hours, so a
+        // cutoff derived from the freshness window deleted rows for being POLLED LATE rather
+        // than for the client having gone (seen on prod 2026-08-17: ~50 radios / ~85 rows
+        // dropped by one hourly run). Days, not minutes.
+        'retention_days' => (int) env('MYMATE_WIRELESS_RETENTION_DAYS', 90),
+        // DEPRECATED and unused since retention_days landed - the reaper no longer derives its
+        // cutoff from stale_after_minutes. Kept so an install that already sets
+        // MYMATE_WIRELESS_REAP_MULTIPLIER keeps booting; drop it at the next major.
         'reap_multiplier' => (int) env('MYMATE_WIRELESS_REAP_MULTIPLIER', 4),
     ],
 

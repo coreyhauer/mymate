@@ -68,9 +68,11 @@ return new class extends Migration
             // touched again by the upsert - see ReadWireless::persist. Answers "how long has
             // this client actually been coming back", which last_seen_at alone can't.
             $table->timestampTz('first_seen_at');
-            // Commit-time stamp of the poll that last saw this client. Doubles as the
-            // staleness horizon the read API's default filter and `mymate:wireless:reap` key
-            // off, same contract as ospf_neighbors.last_seen_at.
+            // Commit-time stamp of the poll that last saw this client, same contract as
+            // ospf_neighbors.last_seen_at. Two independent horizons key off it: the read API's
+            // DEFAULT freshness filter (mymate.wireless.stale_after_minutes - a query filter,
+            // overridable per request) and `mymate:wireless:reap`'s retention cutoff
+            // (mymate.wireless.retention_days, default 90). Hidden is not deleted.
             $table->timestampTz('last_seen_at');
 
             // (device_id): every per-device persist, and the prune that follows a non-empty read.

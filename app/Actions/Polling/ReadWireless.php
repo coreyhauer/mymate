@@ -52,8 +52,9 @@ class ReadWireless
      * which can tell "no OSPF configured" from "OSPF configured but no adjacencies" by whether
      * any OSPF interface exists - there is no equivalent signal here to tell "genuinely no
      * clients right now" from "could not read". So an empty read prunes nothing; existing rows
-     * are left in place and age out through the staleness filter and `mymate:wireless:reap` if
-     * the radio never reports again.
+     * are left in place, drop out of the read API's default freshness window, and are finally
+     * deleted by `mymate:wireless:reap` only once they pass `mymate.wireless.retention_days`
+     * (default 90) - so a radio the poller merely got to late keeps its client list.
      *
      * @param  array<int, array<string, mixed>>  $rows
      */
