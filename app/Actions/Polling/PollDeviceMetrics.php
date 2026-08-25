@@ -74,7 +74,9 @@ class PollDeviceMetrics
                 ? $device->credential
                 : $device->routerosCredential;
             if ($rosCred !== null) {
-                $read = ($this->ospf)($device->mgmt_ip, $rosCred);
+                // The device id is what lets ReadOspf also persist the per-neighbour detail it
+                // has always read and discarded; the returned count is unaffected.
+                $read = ($this->ospf)($device->mgmt_ip, $rosCred, (int) $device->id);
                 $ospf = $read['neighbors'];
                 $this->writeOspfCosts($device, $read['costs']);
             }

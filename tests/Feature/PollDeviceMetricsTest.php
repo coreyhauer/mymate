@@ -85,7 +85,10 @@ class PollDeviceMetricsTest extends TestCase
         {
             public function __construct() {}
 
-            public function __invoke(string $host, \App\Models\Credential $cred): array
+            // Must mirror the real signature exactly - PHP fatals on an override that accepts
+            // fewer parameters than its parent. The third argument is the device id ReadOspf
+            // uses to persist per-neighbour rows; this fake short-circuits before that.
+            public function __invoke(string $host, \App\Models\Credential $cred, ?int $deviceId = null): array
             {
                 return ['neighbors' => 4, 'costs' => ['ether1' => 10]];
             }

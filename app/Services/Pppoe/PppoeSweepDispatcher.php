@@ -5,6 +5,7 @@ namespace App\Services\Pppoe;
 use App\Enums\PollMethod;
 use App\Jobs\SweepPppoeSessionsBatchJob;
 use App\Models\Device;
+use App\Support\EngineLog;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -41,6 +42,12 @@ class PppoeSweepDispatcher
         $shards = max(1, (int) config('mymate.pppoe.shards', 96));
         $window = max(0, (int) config('mymate.pppoe.stagger_seconds', 240));
 
+        // Only on a full fleet run: a canary/single-device dispatch must not draw conclusions
+        // about the rest of the fleet, and reaping on one is how you delete the fleet.
+        if ($limit === null && $deviceId === null) {
+            $this->reapStale();
+        }
+
         $ids = $this->concentratorIds($limit, $deviceId);
         if ($ids === []) {
             return ['devices' => 0, 'shards' => 0, 'window' => 0, 'step' => 0.0];
@@ -58,12 +65,16 @@ class PppoeSweepDispatcher
         $count = count($byShard);
         $step = ($stagger && $window > 0 && $count > 1) ? $window / $count : 0.0;
 
+        // A targeted run (--device / --limit) is a manual one: it gets its own overlap-lock
+        // namespace so the scheduler holding that shard can't silently swallow it.
+        $manual = $limit !== null || $deviceId !== null;
+
         $i = 0;
         foreach ($byShard as $shard => $shardIds) {
             $delay = (int) round($i * $step);
             // PendingDispatch: ->delay() proxies onto the job and the dispatch itself happens
             // on destruct, so this stays the ordinary `Job::dispatch(...)` house form.
-            $pending = SweepPppoeSessionsBatchJob::dispatch((int) $shard, $shardIds);
+            $pending = SweepPppoeSessionsBatchJob::dispatch((int) $shard, $shardIds, $manual);
             if ($delay > 0) {
                 $pending->delay($delay);
             }
@@ -111,6 +122,52 @@ class PppoeSweepDispatcher
         }
 
         return $query->pluck('id')->map(fn ($id): int => (int) $id)->all();
+    }
+
+    /**
+     * How many devices a dispatch with these options WOULD cover, without dispatching - the
+     * `--dry-run` counterpart to dispatch(), sharing its exact selection so the two can never
+     * disagree.
+     */
+    public function wouldDispatch(?int $limit = null, ?int $deviceId = null): int
+    {
+        return count($this->concentratorIds($limit, $deviceId));
+    }
+
+    /**
+     * Delete rows no sweep has refreshed in a long time.
+     *
+     * A concentrator that leaves the sweep - renamed out of the name filter, unmonitored,
+     * credential pulled, decommissioned, moved behind an agent - simply stops having its rows
+     * refreshed. Nothing else would ever remove them, so its last sessions would be served as
+     * live customers forever. (Device deletion is already covered by the FK cascade; this is
+     * about devices that still exist but stopped being swept.)
+     *
+     * The read API hides rows past `stale_after_minutes` first, so by the time this deletes
+     * anything it has been invisible for `reap_multiplier` times that long - deletion is the
+     * long-stop, not the mechanism. Runs on the 5-minute dispatch tick: one indexed DELETE
+     * that normally matches nothing, which is cheaper than owning a schedule entry for it.
+     *
+     * @return int rows deleted
+     */
+    public function reapStale(): int
+    {
+        $staleAfter = max(1, (int) config('mymate.pppoe.stale_after_minutes', 30));
+        $multiplier = max(1, (int) config('mymate.pppoe.reap_multiplier', 8));
+        $cutoff = now()->subMinutes($staleAfter * $multiplier);
+
+        $deleted = DB::table('pppoe_sessions')->where('swept_at', '<', $cutoff)->delete();
+
+        if ($deleted > 0) {
+            // Never silent: this is the only place rows leave the table without a device
+            // having reported on them, so it should be visible when it happens.
+            EngineLog::warning('pppoe: reaped stale sessions', [
+                'deleted' => $deleted,
+                'older_than' => $cutoff->toIso8601String(),
+            ]);
+        }
+
+        return $deleted;
     }
 
     /**

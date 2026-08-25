@@ -420,6 +420,73 @@ return [
         'timeout' => (int) env('MYMATE_ROUTEROS_TIMEOUT', 3), // seconds
     ],
 
+    // PPPoE active-session sweep: read `/ppp/active` off every PPPoE concentrator on a slow
+    // cadence and materialise it into `pppoe_sessions` (App\Actions\Pppoe\SweepPppoeSessions,
+    // dispatched by App\Services\Pppoe\PppoeSweepDispatcher / `mymate:pppoe:sweep`).
+    // V1 is RouterOS-only: SNMP-polled concentrators are excluded because RouterOS publishes
+    // no active-PPPoE table over SNMP - see the dispatcher's docblock.
+    'pppoe' => [
+        // Master switch. Off = the scheduled command returns immediately (the table just goes
+        // stale, which the read API's swept_at makes visible rather than silent).
+        'enabled' => (bool) env('MYMATE_PPPOE_ENABLED', true),
+        // Which devices are concentrators. Matched case-insensitively against devices.name
+        // (ILIKE), because that is how this fleet is actually named. Change it here rather
+        // than in code if a deployment names them differently.
+        'name_filter' => env('MYMATE_PPPOE_NAME_FILTER', '%pppoe%'),
+        // Isolated Horizon queue (see config/horizon.php supervisor-pppoe) so a slow sweep can
+        // only ever delay itself - never polling, discovery or backups.
+        'queue' => env('MYMATE_PPPOE_QUEUE', 'pppoe'),
+        // Scale-out: the fleet is sharded into N batch jobs by crc32(device_id) % shards, same
+        // key as the poll dispatcher. ~2,300 concentrators / 96 shards = ~24 devices per job,
+        // which is a job that finishes in tens of seconds rather than minutes. Raise this AND
+        // MYMATE_PPPOE_PROCESSES together for a bigger fleet - job count must track shard
+        // count, never device count.
+        'shards' => (int) env('MYMATE_PPPOE_SHARDS', 96),
+        // Seconds to spread shard dispatch over (queue-side delay, not a sleep). Keeps the
+        // sweep a trickle instead of a 2,300-router thundering herd at t=0. Must stay
+        // comfortably below the 300s cadence so a cycle finishes before the next one starts.
+        'stagger_seconds' => (int) env('MYMATE_PPPOE_STAGGER_SECONDS', 240),
+        // Per-device RouterOS connect/read timeout (s). Higher than mymate.routeros.timeout (3)
+        // because a concentrator's /ppp/active is a far bigger read than a throughput tick, but
+        // still short enough that a black-holing device fails fast instead of wedging a worker.
+        'timeout' => (int) env('MYMATE_PPPOE_TIMEOUT', 5),
+        // Whole-job ceiling (s); mirrored by supervisor-pppoe's worker timeout and by the
+        // per-shard overlap lock's expireAfter, so a killed worker can't lock a shard out.
+        'job_timeout' => (int) env('MYMATE_PPPOE_JOB_TIMEOUT', 300),
+        // Sanity bound on rows accepted from one concentrator (real ones carry ~15-80). Hitting
+        // it logs loudly and truncates - never a silent partial write.
+        'max_sessions_per_device' => (int) env('MYMATE_PPPOE_MAX_SESSIONS', 4000),
+        // How long a row may go un-refreshed before it stops counting as "online" (minutes).
+        // A concentrator renamed out of the filter, unmonitored, or otherwise dropped from the
+        // sweep stops refreshing its rows - without this they would be served as live sessions
+        // forever. Two things act on it: the read API hides rows older than this by default
+        // (?stale=1 / ?max_age_minutes= override), and the sweep tick deletes rows older than
+        // stale_after_minutes x reap_multiplier outright. Must stay comfortably above the
+        // 5-minute cadence plus the stagger window or a healthy slow shard would flicker out
+        // of the default view.
+        'stale_after_minutes' => (int) env('MYMATE_PPPOE_STALE_AFTER_MINUTES', 30),
+        // Reap only well past the staleness horizon, so "hidden by default" always happens
+        // first and deletion is the long-stop: 30m x 8 = 4h of grace.
+        'reap_multiplier' => (int) env('MYMATE_PPPOE_REAP_MULTIPLIER', 8),
+    ],
+
+    // OSPF adjacencies, captured per device by App\Actions\Polling\ReadOspf as a side-effect of
+    // the metrics poll it already runs - RouterOS exposes no OSPF-MIB over SNMP, so that API
+    // read is the only source of per-neighbour truth. See the ospf_neighbors migration and
+    // App\Http\Controllers\Api\OspfNeighborController.
+    'ospf' => [
+        // Persist the per-neighbour detail. Off = ReadOspf keeps returning the Full-neighbour
+        // count exactly as it always has and simply writes nothing - the pre-existing
+        // behaviour, and the kill switch if the write ever misbehaves on real gear.
+        'persist' => (bool) env('MYMATE_OSPF_PERSIST', true),
+        // Same staleness contract as PPPoE above. A device that stops being polled stops
+        // refreshing its rows, and a long-dead adjacency must never be served as a live one:
+        // the read API hides rows older than this by default, and `mymate:ospf:reap` deletes
+        // them past stale_after_minutes x reap_multiplier.
+        'stale_after_minutes' => (int) env('MYMATE_OSPF_STALE_AFTER_MINUTES', 30),
+        'reap_multiplier' => (int) env('MYMATE_OSPF_REAP_MULTIPLIER', 8),
+    ],
+
     // Firmware upgrades. Ordered upgrades wait for each device to
     // come back online before upgrading its parent, so the path upstream is never cut.
     'upgrade' => [
