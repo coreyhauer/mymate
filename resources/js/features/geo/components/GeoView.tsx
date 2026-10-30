@@ -15,6 +15,7 @@ import { useUpdateDevice } from '../../devices/api/updateDevice';
 import { useIsAdmin } from '../../auth/api/auth';
 import { useMapConfig, useGeocode } from '../api/geo';
 import { useBackhauls, useGeoDevices } from '../api/sites';
+import { BackhaulEditor } from './BackhaulEditor';
 import { LayerToggle, loadLayerPrefs, persistLayerPrefs, type LayerPrefs } from './geoLayers';
 import { pushToast } from '../../../lib/toast';
 import type { Device, DeviceStatus } from '../../../types';
@@ -73,6 +74,7 @@ export function GeoView() {
     const backhaulLayerRef = useRef<L.LayerGroup | null>(null);
     const [placing, setPlacing] = useState<Device | null>(null); // device awaiting a click-to-place
     const placingId = placing?.id ?? null;
+    const [editingBackhauls, setEditingBackhauls] = useState(false);
     const [address, setAddress] = useState('');
 
     const placed = useMemo(() => geoDevices ?? [], [geoDevices]);
@@ -233,7 +235,20 @@ export function GeoView() {
             <div className="absolute bottom-4 left-3 z-[500] flex gap-1.5">
                 <LayerToggle label="Devices" on={layers.sites} onClick={() => toggleLayer('sites')} title="Show device markers" />
                 <LayerToggle label="Backhauls" on={layers.backhauls} onClick={() => toggleLayer('backhauls')} title="Show site-to-site backhaul lines" />
+                {isAdmin && (
+                    <button
+                        type="button"
+                        onClick={() => setEditingBackhauls((v) => !v)}
+                        title="Add or remove site-to-site backhaul links"
+                        className="rounded-lg px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] ring-1 backdrop-blur transition-colors bg-black/50 text-white/55 ring-white/15 hover:bg-black/70 hover:text-white/80"
+                    >
+                        Edit backhauls
+                    </button>
+                )}
             </div>
+
+            {/* Backhaul editor (admin) - fix a missing or stale tower-to-tower line without a shell. */}
+            {isAdmin && editingBackhauls && <BackhaulEditor onClose={() => setEditingBackhauls(false)} />}
 
             {/* Placement panel (admin) - place devices that have no coordinates yet. */}
             {isAdmin && (
