@@ -41,6 +41,7 @@ use App\Http\Controllers\Api\SecuritySettingController;
 use App\Http\Controllers\Api\SensorController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\SiteController;
+use App\Http\Controllers\Api\SiteLinkController;
 use App\Http\Controllers\Api\SubnetController;
 use App\Http\Controllers\Api\SystemStatusController;
 use App\Http\Controllers\Api\Tools\ToolsController;
@@ -417,6 +418,11 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
     // inherit their site's coordinates on the geo map, so a whole tower places at once.
     Route::apiResource('sites', SiteController::class)
         ->only(['index', 'show', 'store', 'update', 'destroy']);
+
+    // Site-to-site backhaul links (the geo map's tower-to-tower lines). Same table the OSS
+    // import fills; the geo map can now fix a missing or wrong pair without a shell.
+    Route::apiResource('site-links', SiteLinkController::class)
+        ->only(['index', 'store', 'update', 'destroy']);
 
     // Auto-discovery: authorized scan ranges + the candidate review queue.
     Route::apiResource('subnets', SubnetController::class)->only(['index', 'store', 'update', 'destroy']);
